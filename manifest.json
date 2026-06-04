@@ -1,10 +1,10 @@
 {
-	"id": "chinese-novel-assistant",
-	"name": "Chinese Novel Assistant",
-	"version": "0.2.9",
+	"id": "Cedric-novel-assistant",
+	"name": "Chinese Novel Assistant (modified by Cedric)",
+	"version": "0.3.0",
 	"minAppVersion": "0.15.0",
 	"description": "A set of small features designed to make writing Chinese novels more convenient.",
-	"author": "pingo8888",
-	"authorUrl": "https://github.com/pingo8888",
+	"author": "Cedric",
+	"authorUrl": "https://github.com/HuaShaop",
 	"isDesktopOnly": true
 }

@@ -37,7 +37,8 @@ async function runCreateNextChapterFileCommand(ctx: PluginContext): Promise<void
 
 	try {
 		const resolved = resolveAvailableChapterFilePath(ctx, parentPath, chapterNameFormat, nextChapterNumber);
-		const createdFile = await ctx.app.vault.create(resolved.filePath, "");
+		const resolvedTemplate = applyChapterNameFormat(ctx.settings.chapterTemplate, resolved.chapterNumber);
+		const createdFile = await ctx.app.vault.create(resolved.filePath, resolvedTemplate);
 		await openMarkdownFileWithoutDuplicate(ctx.app, createdFile.path, ctx.settings.openFileInNewTab);
 	} catch (error) {
 		console.error("[Chinese Novel Assistant] Failed to create next chapter file.", error);
