@@ -9,7 +9,8 @@ export type CustomTypeKey =
 	| "side_story"
 	| "bookmark"
 	| "comment"
-	| "pending";
+	| "pending"
+	| string;
 
 export interface CustomTypeSettingItem {
 	key: CustomTypeKey;
@@ -166,28 +167,30 @@ export function updateCustomTypeSettings(
 	return next;
 }
 
+/**
+ * Resolves custom types based on raw values and defaults.
+ * @param rawValue 
+ * @param defaults 
+ * @returns CustomTypeSettingItem[]
+ */
 function resolveCustomTypes(rawValue: unknown, defaults: readonly CustomTypeSettingItem[]): CustomTypeSettingItem[] {
-	const raw: unknown[] = Array.isArray(rawValue) ? rawValue : [];
+	const rawItems: unknown[] = Array.isArray(rawValue) ? rawValue : [];
 	const rawByKey = new Map<CustomTypeKey, unknown>();
-	for (const item of raw) {
-		if (!isRecord(item)) {
-			continue;
-		}
+	const defaultKeySet = new Set(defaults.map(d => d.key));//to quickly check if custom types 
+	
+	for (const item of rawItems) {
+		if (!isRecord(item)) continue;
 		const key = parseCustomTypeKey(item["key"]);
-		if (!key || rawByKey.has(key)) {
-			continue;
-		}
+		if (!key || rawByKey.has(key)) continue;
 		rawByKey.set(key, item);
 	}
 
 	const resolved: CustomTypeSettingItem[] = [];
-	for (let index = 0; index < defaults.length; index += 1) {
+	for (let index = 0; index < defaults.length; index++) {
 		const fallback = defaults[index];
-		if (!fallback) {
-			continue;
-		}
+		if (!fallback) continue;
 		const rawByKeyItem = rawByKey.get(fallback.key);
-		const rawByIndexItem = raw[index];
+		const rawByIndexItem = rawItems[index];
 		const rawItem = isRecord(rawByKeyItem)
 			? rawByKeyItem
 			: (isRecord(rawByIndexItem) ? rawByIndexItem : null);
@@ -203,6 +206,21 @@ function resolveCustomTypes(rawValue: unknown, defaults: readonly CustomTypeSett
 			colorHex,
 		});
 	}
+
+	// 处理用户添加的自定义类型
+	for (const [key, rawItem] of rawByKey.entries()) {
+		if (defaultKeySet.has(key)) continue;
+		if(!isRecord(rawItem)) continue;
+		const label = typeof rawItem["label"] === "string"
+			? rawItem["label"].trim()
+			: key;
+        const colorHex = normalizeColorHex(rawItem["colorHex"]) ?? "#9CA3AF";
+        resolved.push({
+            key,
+            label,
+            colorHex,
+        });
+    }
 	return resolved;
 }
 
@@ -212,16 +230,63 @@ function normalizeColorHex(value: unknown): string | undefined {
 }
 
 function parseCustomTypeKey(value: unknown): CustomTypeKey | null {
-	switch (value) {
-		case "summary":
-		case "foreshadow":
-		case "memo":
-		case "side_story":
-		case "bookmark":
-		case "comment":
-		case "pending":
-			return value;
-		default:
-			return null;
+	if (typeof value === "string" && value.length > 0) {
+		return value;
 	}
+	return null;
+}
+
+let customTypeCounter = 0; // 用于生成唯一 key 的计数器
+// 判断某个 key 是否为默认类型（用于 UI 判断是否显示删除按钮）
+
+export function isDefaultTypeKey(
+    key: CustomTypeKey,
+    defaults: readonly CustomTypeSettingItem[],
+): boolean {
+    return defaults.some((d) => d.key === key);
+}
+
+// 获取默认类型数组的引用
+export function getAnnotationDefaults(): readonly CustomTypeSettingItem[] {
+    return DEFAULT_ANNOTATION_CUSTOM_TYPES;
+}
+
+// 添加新类型
+export function addCustomType(
+    current: unknown,
+    resolver: (rawValue: unknown) => CustomTypeSettingItem[],
+    defaults: readonly CustomTypeSettingItem[],
+): CustomTypeSettingItem[] {
+    const next = resolver(current);
+    customTypeCounter += 1;
+    const newKey = `custom_${Date.now()}_${customTypeCounter}`;  // 生成唯一 key
+    const usedColors = new Set(next.map((item) => item.colorHex));
+    let newColor = "#9CA3AF";
+    for (const color of DEFAULT_COLORS) {
+        if (!usedColors.has(color)) {
+            newColor = color;  // 选取一个未使用的颜色
+            break;
+        }
+    }
+    next.push({
+        key: newKey,
+        label: "",
+        colorHex: newColor,
+    });
+    return next;
+}
+
+// 删除类型（仅用户添加的类型可删除）
+export function deleteCustomType(
+    current: unknown,
+    keyToDelete: string,
+    resolver: (rawValue: unknown) => CustomTypeSettingItem[],
+    defaults: readonly CustomTypeSettingItem[],
+): CustomTypeSettingItem[] {
+    const next = resolver(current);
+    const isDefaultKey = defaults.some((d) => d.key === keyToDelete);
+    if (isDefaultKey) {
+        return next;  // 默认类型不可删除
+    }
+    return next.filter((item) => item.key !== keyToDelete);
 }

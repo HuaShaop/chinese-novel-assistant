@@ -2,6 +2,7 @@ import { Setting, type App, type ColorComponent, type TextComponent } from "obsi
 import { askForConfirmation } from "../../../ui";
 import { parseColorHex, toRgba } from "../../../utils";
 import { createSettingsSectionHeading } from "./heading";
+import { isDefaultTypeKey } from "../../../core";
 
 export interface ColorConfigItem {
 	key: string;
@@ -39,8 +40,16 @@ interface ColorConfigGroupOptions extends BaseConfigGroupOptions {
 
 interface TypeConfigGroupOptions extends BaseConfigGroupOptions {
 	items: TypeConfigItem[];
+	isDefaultKey: (key: string) => boolean;
 	onLabelChange: (key: string, label: string) => Promise<void>;
 	onColorChange: (key: string, colorHex: string) => Promise<void>;
+	onAddType: () => Promise<void>;
+	onDeleteType: (key: string) => Promise<void>;
+	addTypeLabel: string;
+	addTypeDesc: string;
+	deleteTypeLabel: string;
+	deleteTypeConfirmTitle: string;
+	deleteTypeConfirmMessage: string;
 }
 
 export function renderColorConfigGroup(options: ColorConfigGroupOptions): void {
@@ -115,7 +124,42 @@ export function renderTypeConfigGroup(options: TypeConfigGroupOptions): void {
 				await options.onColorChange(item.key, nextColorHex);
 			},
 		});
+		const isDefault = options.isDefaultKey(item.key);
+		if (!isDefault) {
+			setting.addButton((button) =>
+				button
+					.setButtonText(options.deleteTypeLabel)
+					.setWarning()
+					.setDisabled(disabled)
+					.onClick(async () => {
+						const confirmed = await askForConfirmation(options.app, {
+							title: options.deleteTypeConfirmTitle,
+							message: options.deleteTypeConfirmMessage,
+							confirmText: options.restoreDefaultsConfirmText,
+							cancelText: options.restoreDefaultsCancelText,
+						});
+						if (!confirmed) {
+							return;
+						}
+						await options.onDeleteType(item.key);
+					}),
+			);
+		}
 	}
+
+	new Setting(options.panelEl)
+		.setName("")
+        .setClass("cna-settings-item")
+        .setDisabled(disabled)
+        .addButton((button) =>
+            button
+                .setButtonText(options.addTypeLabel)
+                .setCta()
+                .setDisabled(disabled)
+                .onClick(async () => {
+                    await options.onAddType();
+                }),
+        );
 }
 
 function renderRestoreDefaultsSetting(
