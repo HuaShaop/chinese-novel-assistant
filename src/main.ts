@@ -19,11 +19,15 @@ import { registerNovelLibraryFeature } from "./features/novel-library";
 import { registerAnnotationFeature, registerAnnotationSidebarView } from "./features/annotation";
 import { registerTimelineSidebarView } from "./features/timeline";
 
+import { logger } from "./utils/logger";
+
 export default class CNAPlugin extends Plugin {
 	private settingStore = new SettingStore(this);
 	private ctx: PluginContext | null = null;
 
 	async onload(): Promise<void> {
+		logger.setPrefix("CNAPlugin");
+		logger.info("loading...");
 		await this.loadSettings();
 
 		this.ctx = createPluginContext(this.createContextHost());
