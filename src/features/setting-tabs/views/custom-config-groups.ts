@@ -2,7 +2,6 @@ import { Setting, type App, type ColorComponent, type TextComponent } from "obsi
 import { askForConfirmation } from "../../../ui";
 import { parseColorHex, toRgba } from "../../../utils";
 import { createSettingsSectionHeading } from "./heading";
-import { isDefaultTypeKey } from "../../../core";
 
 export interface ColorConfigItem {
 	key: string;
@@ -40,7 +39,7 @@ interface ColorConfigGroupOptions extends BaseConfigGroupOptions {
 
 interface TypeConfigGroupOptions extends BaseConfigGroupOptions {
 	items: TypeConfigItem[];
-	isDefaultKey: (key: string) => boolean;
+	isDefaultKey: (key: string ) => boolean;
 	onLabelChange: (key: string, label: string) => Promise<void>;
 	onColorChange: (key: string, colorHex: string) => Promise<void>;
 	onAddType: () => Promise<void>;
@@ -124,8 +123,7 @@ export function renderTypeConfigGroup(options: TypeConfigGroupOptions): void {
 				await options.onColorChange(item.key, nextColorHex);
 			},
 		});
-		const isDefault = options.isDefaultKey(item.key);
-		if (!isDefault) {
+		if (!options.isDefaultKey(item.key)) {
 			setting.addButton((button) =>
 				button
 					.setButtonText(options.deleteTypeLabel)

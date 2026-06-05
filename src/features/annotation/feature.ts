@@ -6,13 +6,15 @@ import { normalizeVaultPath } from "../../core/novel-library-service";
 import { parseColorHex, resolveEditorViewFromMarkdownView, resolveMarkdownViewByEditorView, toRgba, truncateMenuTitle } from "../../utils";
 import { type AnnotationAnchorSnapshot, type AnnotationSelectionAnchor, AnnotationRepository } from "./repository";
 import { emitAnnotationCreated, subscribeAnnotationLocateFlash, type AnnotationLocateFlashPayload } from "./flash-bus";
-import { scheduleAttachColorSwatchesToLatestMenu } from "../../ui";
+import { scheduleAttachColorSwatchesToLatestMenu,promptTextInput } from "../../ui";
 import {
 	getAnnotationColorTypes,
 	normalizeAnnotationColorHex,
 	resolveAnnotationDefaultTypeColor,
 	resolveAnnotationTypeTitle,
 } from "./color-types";
+import { logger } from "../../utils/logger";
+logger.setPrefix("annotation-feature")
 
 const ANNOTATION_RANGE_FORCE_REFRESH = Annotation.define<boolean>();
 const ANNOTATION_RANGE_MARK_CLASS = "cna-annotation-range-mark";
@@ -164,13 +166,22 @@ class AnnotationFeature {
 		colorHex?: string,
 	): Promise<void> {
 		try {
+			const title = await promptTextInput(this.plugin.app, {
+				title: this.ctx.t("feature.annotation.create.title"),
+				placeholder: this.ctx.t("feature.annotation.create.placeholder"),
+				initialValue: this.ctx.t("feature.annotation.default_title"),
+				confirmText: this.ctx.t("settings.common.confirm"),
+				cancelText: this.ctx.t("settings.common.cancel"),
+			});
+			if (title === null) return;
 			const createdCard = await this.repository.createEntryAtSelection(
 				this.ctx.settings,
 				sourcePath,
 				selection,
-				this.ctx.t("feature.annotation.default_title"),
+				title??this.ctx.t("feature.annotation.default_title"),
 				colorHex,
 			);
+			logger.debug("cardTitle:",title??this.ctx.t("feature.annotation.default_title"));
 			const normalizedPath = normalizeVaultPath(sourcePath);
 			this.anchorSnapshotsBySourcePath.delete(normalizedPath);
 			this.loadedAnchorPaths.delete(normalizedPath);

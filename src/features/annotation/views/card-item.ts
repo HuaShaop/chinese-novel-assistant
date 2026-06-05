@@ -8,6 +8,8 @@ import { showAnnotationCardMenu } from "./card-menu";
 import { showStickyNoteContentMenu } from "../../sticky-note/views/content-menu";
 import { getAnnotationColorTypes } from "../color-types";
 import type { AnnotationCard } from "./types";
+import { logger } from "../../../utils/logger";
+import { promptTextInput } from "../../../ui";
 
 interface AnnotationCardItemDeps {
 	app: App;
@@ -33,7 +35,6 @@ export function renderAnnotationCardItem(deps: AnnotationCardItemDeps): () => vo
 	const titleDisplayEl = titleMainEl.createDiv({
 		cls: "cna-annotation-card__title cna-annotation-card__title-display",
 	});
-
 	const actionsEl = headerEl.createDiv({ cls: "cna-annotation-card__actions" });
 	const menuButtonEl = actionsEl.createEl("button", {
 		cls: "cna-annotation-card__action-button",
@@ -77,10 +78,28 @@ export function renderAnnotationCardItem(deps: AnnotationCardItemDeps): () => vo
 	};
 
 	const renderTitle = (): void => {
-		const anchorText = card.anchorText.trim() || card.title.trim() || deps.t("feature.annotation.default_title");
-		titleDisplayEl.setText(anchorText);
+		const displayText = card.title.trim() || card.anchorText.trim() || deps.t("feature.annotation.default_title");
+		titleDisplayEl.setText(displayText);
 	};
+	const handleTitleEdit = async (event: MouseEvent): Promise<void> => {
+		event.preventDefault();
+		event.stopPropagation();
 
+		const newTitle = await promptTextInput(deps.app, {
+			title: deps.t("feature.annotation.edit.title"),
+			placeholder: deps.t("feature.annotation.edit.placeholder"),
+			initialValue: card.title,
+			confirmText: deps.t("settings.common.confirm"),
+			cancelText: deps.t("settings.common.cancel"),
+		});
+		logger.debug("card.title", card.title);
+		if (newTitle !== null && newTitle !== card.title) {
+			card.title = newTitle;
+			card.updatedAt = Date.now();
+			renderTitle();
+			deps.onCardTouched();
+		}
+	};
 	const renderContentDisplay = (): void => {
 		const renderVersion = ++contentRenderVersion;
 		contentDisplayEl.empty();
@@ -166,7 +185,7 @@ export function renderAnnotationCardItem(deps: AnnotationCardItemDeps): () => vo
 		}
 		deps.onLocate();
 	});
-
+	titleDisplayEl.addEventListener("dblclick", handleTitleEdit);
 	contentDisplayEl.addEventListener("click", (event) => {
 		event.preventDefault();
 		event.stopPropagation();
@@ -248,7 +267,3 @@ function applyCardTone(rootEl: HTMLElement, colorHex?: string): void {
 	rootEl.style.setProperty("--cna-annotation-card-accent", colorHex);
 	rootEl.style.setProperty("--cna-annotation-card-accent-alpha", toRgba(colorHex, 0.25));
 }
-
-
-
-

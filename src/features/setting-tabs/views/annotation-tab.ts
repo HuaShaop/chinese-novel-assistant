@@ -1,5 +1,5 @@
 import { Setting } from "obsidian";
-import { getAnnotationDefaults, resolveAnnotationCustomTypes, resolveAnnotationTypeOptions, resolveTypeOptionTitle, updateCustomTypeSettings,isDefaultTypeKey,addCustomType,deleteCustomType } from "../../../core";
+import { resolveAnnotationCustomTypes, resolveAnnotationTypeOptions, resolveTypeOptionTitle, updateCustomTypeSettings,addCustomType,deleteCustomType, isDefaultTypeKey } from "../../../core";
 import { getAnnotationRepository } from "../../../features/annotation/repository";
 import { createSettingsSectionHeading } from "./heading";
 import type { SettingsTabRenderContext } from "./types";
@@ -9,8 +9,6 @@ export function renderAnnotationSettings(containerEl: HTMLElement, deps: Setting
 	const { ctx, refresh } = deps;
 	const panelEl = containerEl.createDiv({ cls: "cna-settings-panel" });
 	const repository = getAnnotationRepository(ctx.app);
-	const defaults = getAnnotationDefaults();
-
 	createSettingsSectionHeading(panelEl, ctx.t("settings.annotation.section.main"));
 
 	new Setting(panelEl)
@@ -51,47 +49,17 @@ export function renderAnnotationSettings(containerEl: HTMLElement, deps: Setting
 		restoreDefaultsCancelText: ctx.t("settings.common.cancel"),
 		labelInputPlaceholder: ctx.t("settings.annotation.type.label_placeholder"),
 		colorInputPlaceholder: "#4A86E9",
-		isDefaultKey: (key) => isDefaultTypeKey(key, defaults),
-		addTypeLabel: ctx.t("settings.annotation.add_type"),
-		addTypeDesc: ctx.t("settings.annotation.add_type.desc"),
-		deleteTypeLabel: ctx.t("settings.annotation.delete_type"),
-		deleteTypeConfirmTitle: ctx.t("settings.annotation.delete_type.confirm.title"),
-		deleteTypeConfirmMessage: ctx.t("settings.annotation.delete_type.confirm.message"),
-		items: typeOptions.map((option, index) => {
-			const isDefault = isDefaultTypeKey(option.key, defaults);
-			return{
-				key: option.key,
-				name: ctx.t("settings.annotation.type.name")+String(index + 1),
-				label: isDefault ? resolveTypeOptionTitle(option, (key) => ctx.t(key)) : option.label,
-				colorHex: option.colorHex,
-			};
-		}),
+		items: typeOptions.map((option, index) => ({
+			key: option.key,
+			name: ctx.t("settings.annotation.type.name") + String(index + 1),
+			label: resolveTypeOptionTitle(option, (key) => ctx.t(key)),
+			colorHex: option.colorHex,
+		})),
 		onLabelChange: async (key, label) => {
 			const nextTypes = updateCustomTypeSettings(ctx.settings.annotationCustomTypes, key, resolveAnnotationCustomTypes, (item) => {
 				item.label = label;
 			});
 			await ctx.setSettings({ annotationCustomTypes: nextTypes });
-		},
-		onAddType: async () => {
-			const nextTypes = addCustomType(
-				ctx.settings.annotationCustomTypes,
-				resolveAnnotationCustomTypes,
-				defaults
-			);
-			await ctx.setSettings({ annotationCustomTypes: nextTypes });
-			refresh();
-		},
-		onDeleteType: async (key) => {
-			const previousTypes = resolveAnnotationCustomTypes(ctx.settings.annotationCustomTypes);
-			const nextTypes = deleteCustomType(
-				ctx.settings.annotationCustomTypes,
-				key,
-				resolveAnnotationCustomTypes,
-				defaults
-			);
-			await ctx.setSettings({ annotationCustomTypes: nextTypes });
-			await repository.remapTypeColors(ctx.settings, previousTypes, nextTypes);
-			refresh();
 		},
 		onColorChange: async (key, colorHex) => {
 			const previousTypes = resolveAnnotationCustomTypes(ctx.settings.annotationCustomTypes);
@@ -108,6 +76,32 @@ export function renderAnnotationSettings(containerEl: HTMLElement, deps: Setting
 			await repository.remapTypeColors(ctx.settings, previousTypes, nextTypes);
 			refresh();
 		},
+		isDefaultKey: (key)=>isDefaultTypeKey(key,"annotation"),
+		onAddType: async () => {
+			const nextTypes = addCustomType(
+				ctx.settings.annotationCustomTypes,
+				resolveAnnotationCustomTypes
+			);
+			await ctx.setSettings({ annotationCustomTypes: nextTypes });
+			refresh();
+		},
+		onDeleteType: async (key) => {
+			const preTypes = resolveAnnotationCustomTypes(ctx.settings.annotationCustomTypes);
+			const nextTypes = deleteCustomType(
+				preTypes,
+				key,
+				resolveAnnotationCustomTypes				
+			);
+			await ctx.setSettings({ annotationCustomTypes: nextTypes });
+			await repository.remapTypeColors(ctx.settings, preTypes, nextTypes);
+			refresh();
+		},
+		addTypeLabel: ctx.t("settings.annotation.add_type"),
+		addTypeDesc: ctx.t("settings.annotation.add_type.desc"),
+		deleteTypeLabel: ctx.t("settings.annotation.delete_type"),
+		deleteTypeConfirmTitle: ctx.t("settings.annotation.delete_type.confirm.title"),
+		deleteTypeConfirmMessage: ctx.t("settings.annotation.delete_type.confirm.message"),
+
 	});
 }
 

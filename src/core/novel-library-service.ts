@@ -1,7 +1,7 @@
 import { App, TFolder } from "obsidian";
 import type { SettingDatas } from "./setting-datas";
 
-const NOVEL_LIBRARY_FEATURE_DIR_NAME = "00_功能库";
+const NOVEL_LIBRARY_FEATURE_DIR_NAME = "_功能库";
 
 export const NOVEL_LIBRARY_SUBDIR_NAMES = {
 	guidebook: "设定库",
@@ -10,6 +10,7 @@ export const NOVEL_LIBRARY_SUBDIR_NAMES = {
 	timeline: "时间轴库",
 	snippet: "片段库",
 	proofreadDictionary: "纠错词库",
+	templeLibrary: "模板库",
 } as const;
 
 type NovelLibrarySubdirKey = keyof typeof NOVEL_LIBRARY_SUBDIR_NAMES;

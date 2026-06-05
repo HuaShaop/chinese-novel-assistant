@@ -1,20 +1,9 @@
 import { Setting, type App } from "obsidian";
-import { resolveTimelineCustomTypes, resolveTimelineTypeOptions, resolveTypeOptionTitle, updateCustomTypeSettings } from "../../../core";
+import { addCustomType, deleteCustomType, isDefaultTypeKey, resolveTimelineCustomTypes, resolveTimelineTypeOptions, resolveTypeOptionTitle, updateCustomTypeSettings } from "../../../core";
 import { TimelineRepository } from "../../../features/timeline/repository";
 import { createSettingsSectionHeading } from "./heading";
 import type { SettingsTabRenderContext } from "./types";
 import { renderTypeConfigGroup } from "./custom-config-groups";
-
-const TIMELINE_TYPE_NAME_KEYS = [
-	"settings.timeline.type.summary",
-	"settings.timeline.type.foreshadow",
-	"settings.timeline.type.memo",
-	"settings.timeline.type.side_story",
-	"settings.timeline.type.bookmark",
-	"settings.timeline.type.comment",
-	"settings.timeline.type.pending",
-] as const;
-const TIMELINE_TYPE_NAME_FALLBACK_KEY = "settings.timeline.type.pending" as const;
 
 const timelineRepositoryByApp = new WeakMap<App, TimelineRepository>();
 
@@ -22,7 +11,6 @@ export function renderTimelineSettings(containerEl: HTMLElement, deps: SettingsT
 	const { ctx, refresh } = deps;
 	const panelEl = containerEl.createDiv({ cls: "cna-settings-panel" });
 	const repository = getTimelineRepository(ctx.app);
-
 	createSettingsSectionHeading(panelEl, ctx.t("settings.timeline.section.main"));
 
 	new Setting(panelEl)
@@ -49,12 +37,19 @@ export function renderTimelineSettings(containerEl: HTMLElement, deps: SettingsT
 		restoreDefaultsCancelText: ctx.t("settings.common.cancel"),
 		labelInputPlaceholder: ctx.t("settings.timeline.type.label_placeholder"),
 		colorInputPlaceholder: "#4A86E9",
-		items: typeOptions.map((option, index) => ({
-			key: option.key,
-			name: ctx.t(resolveTimelineTypeNameKey(index)),
-			label: resolveTypeOptionTitle(option, (key) => ctx.t(key)),
-			colorHex: option.colorHex,
-		})),
+		items: typeOptions.map((option, index) => {
+			return{
+				key: option.key,
+				name: ctx.t("settings.timeline.type.name") + String(index + 1),
+				label: resolveTypeOptionTitle(option, (key) => ctx.t(key)),
+				colorHex: option.colorHex,
+			};
+		}),
+		addTypeLabel: ctx.t("settings.timeline.add_type"),
+		addTypeDesc: ctx.t("settings.timeline.add_type.desc"),
+		deleteTypeLabel: ctx.t("settings.timeline.delete_type"),
+		deleteTypeConfirmTitle: ctx.t("settings.timeline.delete_type.confirm.title"),
+		deleteTypeConfirmMessage: ctx.t("settings.timeline.delete_type.confirm.message"),
 		onLabelChange: async (key, label) => {
 			const nextTypes = updateCustomTypeSettings(ctx.settings.timelineCustomTypes, key, resolveTimelineCustomTypes, (item) => {
 				item.label = label;
@@ -76,6 +71,26 @@ export function renderTimelineSettings(containerEl: HTMLElement, deps: SettingsT
 			await repository.remapTypeColors(ctx.settings, previousTypes, nextTypes);
 			refresh();
 		},
+		isDefaultKey: (key)=>isDefaultTypeKey(key,"timeline"),
+		onAddType: async () => {
+			const nextTypes = addCustomType(
+				ctx.settings.timelineCustomTypes,
+				resolveTimelineCustomTypes
+			)
+			await ctx.setSettings({ timelineCustomTypes: nextTypes });
+			refresh();
+		},
+		onDeleteType: async (key) => {
+			const preTypes = resolveTimelineCustomTypes(ctx.settings.timelineCustomTypes);
+			const nextTypes = deleteCustomType(
+				preTypes,
+				key,
+				resolveTimelineCustomTypes
+			);
+			await ctx.setSettings({ timelineCustomTypes: nextTypes });
+			await repository.remapTypeColors(ctx.settings, preTypes, nextTypes);
+			refresh();
+		}
 	});
 }
 
@@ -89,6 +104,3 @@ function getTimelineRepository(app: App): TimelineRepository {
 	return repository;
 }
 
-function resolveTimelineTypeNameKey(index: number): (typeof TIMELINE_TYPE_NAME_KEYS)[number] {
-	return TIMELINE_TYPE_NAME_KEYS[index] ?? TIMELINE_TYPE_NAME_FALLBACK_KEY;
-}

@@ -1,7 +1,9 @@
 import type { TranslationKey } from "../lang";
 import { isRecord, parseColorHex } from "../utils";
 import { STICKY_NOTE_COLORS } from "./constants";
+import { logger } from "../utils/logger";
 
+logger.setPrefix("custom-type-config");
 export type CustomTypeKey =
 	| "summary"
 	| "foreshadow"
@@ -83,7 +85,7 @@ export function resolveAnnotationTypeOptions(rawValue: unknown): ResolvedCustomT
 	const customTypes = resolveAnnotationCustomTypes(rawValue);
 	return customTypes.map((item, index) => ({
 		...item,
-		labelKey: TYPE_LABEL_DEFINITIONS[index]?.labelKey ?? TYPE_LABEL_DEFINITIONS[TYPE_LABEL_DEFINITIONS.length - 1]!.labelKey,
+		labelKey: TYPE_LABEL_DEFINITIONS[index]?.labelKey ?? "feature.annotation.type.custom",
 	}));
 }
 
@@ -91,8 +93,7 @@ export function resolveTimelineTypeOptions(rawValue: unknown): ResolvedCustomTyp
 	const customTypes = resolveTimelineCustomTypes(rawValue);
 	return customTypes.map((item, index) => ({
 		...item,
-		labelKey: TIMELINE_TYPE_LABEL_DEFINITIONS[index]?.labelKey
-			?? TIMELINE_TYPE_LABEL_DEFINITIONS[TIMELINE_TYPE_LABEL_DEFINITIONS.length - 1]!.labelKey,
+		labelKey: TIMELINE_TYPE_LABEL_DEFINITIONS[index]?.labelKey ?? "feature.timeline.type.custom",
 	}));
 }
 
@@ -176,8 +177,7 @@ export function updateCustomTypeSettings(
 function resolveCustomTypes(rawValue: unknown, defaults: readonly CustomTypeSettingItem[]): CustomTypeSettingItem[] {
 	const rawItems: unknown[] = Array.isArray(rawValue) ? rawValue : [];
 	const rawByKey = new Map<CustomTypeKey, unknown>();
-	const defaultKeySet = new Set(defaults.map(d => d.key));//to quickly check if custom types 
-	
+	const defaultKeySet = new Set(defaults.map((item) => item.key));
 	for (const item of rawItems) {
 		if (!isRecord(item)) continue;
 		const key = parseCustomTypeKey(item["key"]);
@@ -207,20 +207,20 @@ function resolveCustomTypes(rawValue: unknown, defaults: readonly CustomTypeSett
 		});
 	}
 
-	// 处理用户添加的自定义类型
 	for (const [key, rawItem] of rawByKey.entries()) {
 		if (defaultKeySet.has(key)) continue;
 		if(!isRecord(rawItem)) continue;
-		const label = typeof rawItem["label"] === "string"
+		const label = rawItem && typeof rawItem["label"] === "string"
 			? rawItem["label"].trim()
 			: key;
-        const colorHex = normalizeColorHex(rawItem["colorHex"]) ?? "#9CA3AF";
+		const colorHex = normalizeColorHex(rawItem["colorHex"]) ?? "#9CA3AF";
+		logger.debug("key:",key,"label:",label);
         resolved.push({
             key,
             label,
             colorHex,
         });
-    }
+	}
 	return resolved;
 }
 
@@ -236,57 +236,39 @@ function parseCustomTypeKey(value: unknown): CustomTypeKey | null {
 	return null;
 }
 
-let customTypeCounter = 0; // 用于生成唯一 key 的计数器
-// 判断某个 key 是否为默认类型（用于 UI 判断是否显示删除按钮）
-
 export function isDefaultTypeKey(
-    key: CustomTypeKey,
-    defaults: readonly CustomTypeSettingItem[],
+	key: CustomTypeKey,
+	type: "annotation"|"timeline"
 ): boolean {
-    return defaults.some((d) => d.key === key);
+	const defaults = type === "annotation"
+		? DEFAULT_ANNOTATION_CUSTOM_TYPES
+		: DEFAULT_TIMELINE_CUSTOM_TYPES;
+	return defaults.some((d) => d.key === key);
 }
 
-// 获取默认类型数组的引用
-export function getAnnotationDefaults(): readonly CustomTypeSettingItem[] {
-    return DEFAULT_ANNOTATION_CUSTOM_TYPES;
+function createCustomTypeKey(): string {
+    return `custom_${Date.now()}`;
 }
 
-// 添加新类型
 export function addCustomType(
     current: unknown,
     resolver: (rawValue: unknown) => CustomTypeSettingItem[],
-    defaults: readonly CustomTypeSettingItem[],
 ): CustomTypeSettingItem[] {
     const next = resolver(current);
-    customTypeCounter += 1;
-    const newKey = `custom_${Date.now()}_${customTypeCounter}`;  // 生成唯一 key
-    const usedColors = new Set(next.map((item) => item.colorHex));
     let newColor = "#9CA3AF";
-    for (const color of DEFAULT_COLORS) {
-        if (!usedColors.has(color)) {
-            newColor = color;  // 选取一个未使用的颜色
-            break;
-        }
-    }
-    next.push({
-        key: newKey,
-        label: "",
-        colorHex: newColor,
-    });
+	next.push({
+		key: createCustomTypeKey(), 
+		label: "",
+		colorHex: newColor,
+	});
     return next;
 }
 
-// 删除类型（仅用户添加的类型可删除）
 export function deleteCustomType(
     current: unknown,
     keyToDelete: string,
     resolver: (rawValue: unknown) => CustomTypeSettingItem[],
-    defaults: readonly CustomTypeSettingItem[],
 ): CustomTypeSettingItem[] {
     const next = resolver(current);
-    const isDefaultKey = defaults.some((d) => d.key === keyToDelete);
-    if (isDefaultKey) {
-        return next;  // 默认类型不可删除
-    }
     return next.filter((item) => item.key !== keyToDelete);
 }
