@@ -4,7 +4,7 @@ import { askForConfirmation, attachFolderSuggest } from "../../../ui";
 import { createSettingsSectionHeading } from "./heading";
 import type { SettingsTabRenderContext } from "./types";
 
-const NOVEL_LIBRARY_FEATURE_DIR_NAMES = new Set(["00_功能库", "00-功能库"].map((name) => name.toLowerCase()));
+const NOVEL_LIBRARY_FEATURE_DIR_NAMES = new Set(["_功能库", "-功能库"].map((name) => name.toLowerCase()));
 
 export function renderGlobalSettings(containerEl: HTMLElement, deps: SettingsTabRenderContext): void {
 	const { app, ctx, refresh } = deps;
@@ -55,6 +55,34 @@ export function renderGlobalSettings(containerEl: HTMLElement, deps: SettingsTab
 					refresh();
 				}),
 		);
+
+	new Setting(panelEl)
+		.setName(ctx.t("settings.global.novel_library.rebuild.name"))
+		.setDesc(ctx.t("settings.global.novel_library.rebuild.desc"))
+		.setClass("cna-settings-item")
+		.addButton((button) => {
+			button
+				.setButtonText(ctx.t("settings.global.novel_library.rebuild.button"))
+				.setCta()
+				.onClick(async () => {
+					if (ctx.settings.novelLibraries.length === 0) {
+						new Notice(ctx.t("settings.global.novel_library.rebuild.no_library"));
+						return;
+					}
+
+					try {
+						for (const libraryPath of ctx.settings.novelLibraries) {
+							await novelLibraryService.ensureNovelLibraryStructure(libraryPath);
+						}
+						new Notice(ctx.t("settings.global.novel_library.rebuild.success"));
+						refresh();
+					} catch (error) {
+						console.error("[Chinese Novel Assistant] Failed to rebuild novel library structure.", error);
+						new Notice(ctx.t("settings.global.novel_library.rebuild.failed"));
+					}
+				});
+		});
+
 	if (pendingInputEl) {
 		attachFolderSuggest(app, pendingInputEl, {
 			shouldIncludeFolderPath: (path) =>
