@@ -1,4 +1,4 @@
-import { type App, Notice, TFile, type MarkdownView } from "obsidian";
+import { type App, Notice, TFile, TFolder, type MarkdownView } from "obsidian";
 import type { TranslationKey } from "../../lang";
 import type {
 	GuidebookTreeData,
@@ -9,7 +9,10 @@ import type {
 import { GuidebookMarkdownParser } from "./markdown-parser";
 import { askForConfirmation, promptTextInput } from "../../ui";
 import { openMarkdownFileWithoutDuplicate, splitLines } from "../../utils";
-
+import { logger } from "../../utils/logger";
+import characterTemplate from "../../../resources/templates/characterTemplate.md"
+import factionTemplate from "../../../resources/templates/factionTemplate.md";
+import locationTemplate from "../../../resources/templates/locationTemplate.md"
 export type GuidebookFileContextAction =
 	| "create_collection"
 	| "create_category"
@@ -61,13 +64,14 @@ export async function handleGuidebookBlankCreateCollection(context: GuidebookAct
 		new Notice(t("feature.guidebook.notice.node_not_found"));
 		return false;
 	}
-
+	//done 修改了设定新建位置
+	const othersSettingPath = `${guidebookRootPath}/其他设定`;
 	const collectionName = await promptCollectionName(app, t, {
 		title: t("feature.guidebook.dialog.create_collection.title"),
 		placeholder: t("feature.guidebook.dialog.collection_name.placeholder"),
 		initialValue: "",
 		validate: (normalizedName) => {
-			const targetPath = buildCollectionPath(guidebookRootPath, normalizedName);
+			const targetPath = buildCollectionPath(othersSettingPath, normalizedName);
 			return !app.vault.getAbstractFileByPath(targetPath);
 		},
 	});
@@ -76,7 +80,7 @@ export async function handleGuidebookBlankCreateCollection(context: GuidebookAct
 	}
 
 	try {
-		await app.vault.create(buildCollectionPath(guidebookRootPath, collectionName), "");
+		await app.vault.create(buildCollectionPath(othersSettingPath, collectionName), "");
 		return true;
 	} catch (error) {
 		console.error(error);
@@ -91,62 +95,84 @@ export async function handleGuidebookFileContextAction(
 	fileNode: GuidebookTreeFileNode,
 ): Promise<boolean> {
 	const { app, t, treeData } = context;
-	const file = resolveSingleSourceCollectionFile(app, t, fileNode);
-	if (!file) {
-		return false;
+	let file: TFile | null = null;
+	let folder: TFolder | null = null;
+	if (fileNode.isSpecific) {
+		folder = resolveSpecificFolder(app, t, fileNode);
+		if (!folder) return false;
+	} else {
+		file = resolveSingleSourceCollectionFile(app, t, fileNode);
+		if (!file) return false;
 	}
-
 	try {
 		switch (action) {
 			case "create_collection":
 				return handleGuidebookBlankCreateCollection(context);
 			case "create_category": {
-				const categoryName = await promptCategoryName(app, t, file, treeData, {
-					title: t("feature.guidebook.dialog.create_category.title"),
-					placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
-					initialValue: "",
-				});
-				if (!categoryName) {
-					return false;
+				if (!fileNode.isSpecific && file) {
+					const categoryName = await promptCategoryName(app, t, file, treeData, {
+						title: t("feature.guidebook.dialog.create_category.title"),
+						placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
+						initialValue: "",
+					});
+					if (!categoryName) {
+						return false;
+					}
+					await appendH1WithUniquenessCheck(app, file, treeData, categoryName);
+					return true;
+				} else if (folder) {
+					const categoryName = await promptCategoryName(app, t, folder, treeData, {
+						title: t("feature.guidebook.dialog.create_category.title"),
+						placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
+						initialValue: "",
+					});
+					if (!categoryName) {
+						return false;
+					}
+					await createSubFolders(app, folder, treeData, categoryName);
+					return true;
 				}
-				await appendH1WithUniquenessCheck(app, file, treeData, categoryName);
-				return true;
 			}
 			case "rename_collection": {
-				const collectionName = await promptCollectionName(app, t, {
-					title: t("feature.guidebook.dialog.rename_collection.title"),
-					placeholder: t("feature.guidebook.dialog.collection_name.placeholder"),
-					initialValue: file.basename,
-					validate: (normalizedName) => {
-						const nextPath = buildCollectionPath(getParentPath(file.path), normalizedName);
-						return nextPath === file.path || !app.vault.getAbstractFileByPath(nextPath);
-					},
-				});
-				if (!collectionName) {
-					return false;
+				if (!fileNode.isSpecific && file) {
+					logger.debug(`file.path=${file.path}`);
+					const collectionName = await promptCollectionName(app, t, {
+						title: t("feature.guidebook.dialog.rename_collection.title"),
+						placeholder: t("feature.guidebook.dialog.collection_name.placeholder"),
+						initialValue: file.basename,
+						validate: (normalizedName) => {
+							const nextPath = buildCollectionPath(getParentPath(file.path), normalizedName);
+							return nextPath === file.path || !app.vault.getAbstractFileByPath(nextPath);
+						},
+					});
+					if (!collectionName) {
+						return false;
+					}
+					const nextPath = buildCollectionPath(getParentPath(file.path), collectionName);
+					if (nextPath === file.path) {
+						return false;
+					}
+					await app.fileManager.renameFile(file, nextPath);
+					return true;
 				}
-				const nextPath = buildCollectionPath(getParentPath(file.path), collectionName);
-				if (nextPath === file.path) {
-					return false;
-				}
-				await app.fileManager.renameFile(file, nextPath);
-				return true;
 			}
 			case "delete_collection": {
-				const confirmed = await askForConfirmation(app, {
-					title: t("feature.guidebook.dialog.delete_collection.title"),
-					message: formatTemplate(t("feature.guidebook.dialog.delete_collection.message"), {
-						name: file.basename,
-					}),
-					confirmText: t("settings.common.delete"),
-					cancelText: t("settings.common.cancel"),
-					confirmIsDanger: true,
-				});
-				if (!confirmed) {
-					return false;
+				if (!fileNode.isSpecific && file) {
+					const confirmed = await askForConfirmation(app, {
+						title: t("feature.guidebook.dialog.delete_collection.title"),
+						message: formatTemplate(t("feature.guidebook.dialog.delete_collection.message"), {
+							name: file.basename,
+						}),
+						confirmText: t("settings.common.delete"),
+						cancelText: t("settings.common.cancel"),
+						confirmIsDanger: true,
+					});
+					if (!confirmed) {
+						return false;
+					}
+					await app.fileManager.trashFile(file);
+					return true;
 				}
-				await app.fileManager.trashFile(file);
-				return true;
 			}
 			default:
 				return false;
@@ -169,66 +195,147 @@ export async function handleGuidebookH1ContextAction(
 	h1Node: GuidebookTreeH1Node,
 ): Promise<boolean> {
 	const { app, t, treeData } = context;
-	const file = resolveCollectionFileByPath(app, h1Node.sourcePath);
-	if (!file) {
+	let file: TFile | null = null;
+	let folder: TFolder | null = null;
+	if (h1Node.isSpecific) {
+		folder = app.vault.getFolderByPath(h1Node.sourcePath);
+	} else {
+		file = resolveCollectionFileByPath(app, h1Node.sourcePath);
+	}
+	if (!file && !folder) {
 		new Notice(t("feature.guidebook.notice.node_not_found"));
 		return false;
 	}
-
 	try {
 		switch (action) {
 			case "create_category": {
-				const categoryName = await promptCategoryName(app, t, file, treeData, {
-					title: t("feature.guidebook.dialog.create_category.title"),
-					placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
-					initialValue: "",
-				});
-				if (!categoryName) {
-					return false;
+				if (!h1Node.isSpecific && file) {
+					const categoryName = await promptCategoryName(app, t, file, treeData, {
+						title: t("feature.guidebook.dialog.create_category.title"),
+						placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
+						initialValue: "",
+					});
+					if (!categoryName) {
+						return false;
+					}
+					await appendH1WithUniquenessCheck(app, file, treeData, categoryName);
+					return true;
+				} else if (folder) {
+					const specificFolder = folder.parent;
+					if (!specificFolder) return false;
+					const categoryName = await promptCategoryName(app, t, specificFolder, treeData, {
+						title: t("feature.guidebook.dialog.create_category.title"),
+						placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
+						initialValue: "",
+					});
+					if (!categoryName) {
+						return false;
+					}
+					await createSubFolders(app, specificFolder, treeData, categoryName);
+					return true;
 				}
-				await appendH1WithUniquenessCheck(app, file, treeData, categoryName);
-				return true;
 			}
 			case "create_setting": {
-				const settingName = await promptSettingName(app, t, file, treeData, {
-					title: t("feature.guidebook.dialog.create_setting.title"),
-					placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
-					initialValue: "",
-				});
-				if (!settingName) {
-					return false;
+				if (!h1Node.isSpecific && file) {
+					const settingName = await promptSettingName(app, t, file, false, treeData, {
+						title: t("feature.guidebook.dialog.create_setting.title"),
+						placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
+						initialValue: "",
+					});
+					if (!settingName) {
+						return false;
+					}
+					await appendH2WithUniquenessCheck(app, file, treeData, h1Node.h1IndexInSource, settingName);
+					return true;
+				} else if (folder) {
+					const currentPath = folder.path;
+					const collectionName = await promptCollectionName(app, t, {
+						title: t("feature.guidebook.dialog.create_collection.title"),
+						placeholder: t("feature.guidebook.dialog.collection_name.placeholder"),
+						initialValue: "",
+						validate: (normalizedName) => {
+							const targetPath = buildCollectionPath(currentPath, normalizedName);
+							return !app.vault.getAbstractFileByPath(targetPath);
+						},
+					});
+					if (!collectionName) {
+						return false;
+					}
+					logger.debug(`h1Node${h1Node.sourcePath}`);
+					let template = "";
+					switch (h1Node.sourcePath.split('/').slice(-2, -1)[0]) {
+						case "地点设定": { template = locationTemplate; break; }
+						case "人物设定": { template = characterTemplate; break; }
+						case "势力设定": { template = factionTemplate; break; }
+					}
+					try {
+						await app.vault.create(buildCollectionPath(currentPath, collectionName), template);
+						return true;
+					} catch (error) {
+						console.error(error);
+						new Notice(t("feature.guidebook.notice.action_failed"));
+						return false;
+					}
 				}
-				await appendH2WithUniquenessCheck(app, file, treeData, h1Node.h1IndexInSource, settingName);
-				return true;
 			}
 			case "rename_category": {
-				const renamed = await promptCategoryName(app, t, file, treeData, {
-					title: t("feature.guidebook.dialog.rename_category.title"),
-					placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
-					initialValue: h1Node.title,
-					ignoreTitle: h1Node.title,
-				});
-				if (!renamed || renamed === h1Node.title) {
-					return false;
+				if (!h1Node.isSpecific && file) {
+					const renamed = await promptCategoryName(app, t, file, treeData, {
+						title: t("feature.guidebook.dialog.rename_category.title"),
+						placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
+						initialValue: h1Node.title,
+						ignoreTitle: h1Node.title,
+					});
+					if (!renamed || renamed === h1Node.title) {
+						return false;
+					}
+					await renameH1WithUniquenessCheck(app, file, treeData, h1Node.h1IndexInSource, renamed);
+					return true;
+				} else if (folder) {
+					const renamed = await promptCategoryName(app, t, folder, treeData, {
+						title: t("feature.guidebook.dialog.rename_category.title"),
+						placeholder: t("feature.guidebook.dialog.category_name.placeholder"),
+						initialValue: h1Node.title,
+						ignoreTitle: h1Node.title,
+					});
+					if (!renamed || renamed === h1Node.title) return false;
+					const newFolderPath = `${folder.parent?.path}/${renamed}`;
+					await app.fileManager.renameFile(folder, newFolderPath);
+					return true;
 				}
-				await renameH1WithUniquenessCheck(app, file, treeData, h1Node.h1IndexInSource, renamed);
-				return true;
 			}
 			case "delete_category": {
-				const confirmed = await askForConfirmation(app, {
-					title: t("feature.guidebook.dialog.delete_category.title"),
-					message: formatTemplate(t("feature.guidebook.dialog.delete_category.message"), {
-						name: h1Node.title,
-					}),
-					confirmText: t("settings.common.delete"),
-					cancelText: t("settings.common.cancel"),
-					confirmIsDanger: true,
-				});
-				if (!confirmed) {
-					return false;
+				if (!h1Node.isSpecific && file) {
+					const confirmed = await askForConfirmation(app, {
+						title: t("feature.guidebook.dialog.delete_category.title"),
+						message: formatTemplate(t("feature.guidebook.dialog.delete_category.message"), {
+							name: h1Node.title,
+						}),
+						confirmText: t("settings.common.delete"),
+						cancelText: t("settings.common.cancel"),
+						confirmIsDanger: true,
+					});
+					if (!confirmed) {
+						return false;
+					}
+					await app.vault.process(file, (content) => deleteH1(content, h1Node.h1IndexInSource));
+					return true;
+				} else if (folder) {
+					const confirmed = await askForConfirmation(app, {
+						title: t("feature.guidebook.dialog.delete_category.title"),
+						message: formatTemplate(t("feature.guidebook.dialog.delete_category.message"), {
+							name: h1Node.title,
+						}),
+						confirmText: t("settings.common.delete"),
+						cancelText: t("settings.common.cancel"),
+						confirmIsDanger: true,
+					});
+					if (!confirmed) {
+						return false;
+					}
+					await app.vault.trash(folder, true);
+					return true;
 				}
-				await app.vault.process(file, (content) => deleteH1(content, h1Node.h1IndexInSource));
-				return true;
 			}
 			default:
 				return false;
@@ -261,16 +368,31 @@ export async function handleGuidebookH2ContextAction(
 	try {
 		switch (action) {
 			case "create_setting": {
-				const settingName = await promptSettingName(app, t, file, treeData, {
-					title: t("feature.guidebook.dialog.create_setting.title"),
-					placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
-					initialValue: "",
-				});
-				if (!settingName) {
-					return false;
+				if (!h2Node.isSpecific) {
+					const settingName = await promptSettingName(app, t, file, true, treeData, {
+						title: t("feature.guidebook.dialog.create_setting.title"),
+						placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
+						initialValue: "",
+					});
+					if (!settingName) return false;
+					await appendH2WithUniquenessCheck(app, file, treeData, h1Node.h1IndexInSource, settingName);
+					return true;
+				} else {
+					const settingName = await promptSettingName(app, t, file, false, treeData, {
+						title: t("feature.guidebook.dialog.create_setting.title"),
+						placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
+						initialValue: "",
+					});
+					if (!settingName) return false;
+					const targetPath = buildCollectionPath(h1Node.sourcePath, settingName)
+					let template = "";
+					switch (h1Node.sourcePath.split('/').slice(-2, -1)[0]) {
+						case "地点设定": { template = locationTemplate; break; }
+						case "人物设定": { template = characterTemplate; break; }
+						case "势力设定": { template = factionTemplate; break; }
+					}
+					await app.vault.create(targetPath, template);
 				}
-				await appendH2WithUniquenessCheck(app, file, treeData, h1Node.h1IndexInSource, settingName);
-				return true;
 			}
 			case "edit_setting": {
 				const targetPosition = await resolveH2HeadingPosition(app, file, h2Node.title);
@@ -285,7 +407,7 @@ export async function handleGuidebookH2ContextAction(
 				return false;
 			}
 			case "rename_setting": {
-				const renamed = await promptSettingName(app, t, file, treeData, {
+				const renamed = await promptSettingName(app, t, file, true, treeData, {
 					title: t("feature.guidebook.dialog.rename_setting.title"),
 					placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
 					initialValue: h2Node.title,
@@ -293,6 +415,14 @@ export async function handleGuidebookH2ContextAction(
 				});
 				if (!renamed || renamed === h2Node.title) {
 					return false;
+				}
+				if (h2Node.isSpecific) {
+					const file = app.vault.getFileByPath(h2Node.sourcePath);
+					if (file) {
+						const newPath = `${file.parent?.path ?? ""}/${renamed}.md`;
+						await app.vault.rename(file, newPath);
+					}
+					return true;
 				}
 				await renameH2WithUniquenessCheck(app, file, treeData, h2Node.h1IndexInSource, h2Node.h2IndexInH1, renamed);
 				return true;
@@ -309,6 +439,11 @@ export async function handleGuidebookH2ContextAction(
 				});
 				if (!confirmed) {
 					return false;
+				}
+				if (h2Node.isSpecific) {
+					const file = app.vault.getFileByPath(h2Node.sourcePath);
+					if (file) await app.vault.trash(file, false);
+					return true;
 				}
 				await app.vault.process(file, (content) =>
 					deleteH2(content, h2Node.h1IndexInSource, h2Node.h2IndexInH1),
@@ -447,6 +582,19 @@ function resolveSingleSourceCollectionFile(app: App, t: (key: TranslationKey) =>
 	return resolveCollectionFileByPath(app, fileNode.sourcePaths[0] ?? "");
 }
 
+function resolveSpecificFolder(app: App, t: (key: TranslationKey) => string, fileNode: GuidebookTreeFileNode): TFolder | null {
+	if (fileNode.sourcePaths.length !== 1) {
+		new Notice(t("feature.guidebook.notice.collection_multi_source_unsupported"));
+		return null;
+	}
+	return resolveSpecificFolderByPath(app, fileNode.sourcePaths[0] ?? "");
+}
+
+function resolveSpecificFolderByPath(app: App, path: string): TFolder | null {
+	const folder = app.vault.getFolderByPath(path);
+	return folder instanceof TFolder ? folder : null;
+}
+
 function getParentPath(path: string): string {
 	const slashIndex = path.lastIndexOf("/");
 	return slashIndex >= 0 ? path.slice(0, slashIndex) : "";
@@ -457,8 +605,8 @@ function normalizeCollectionName(raw: string): string {
 	return trimmed.replace(/\.md$/i, "");
 }
 
-function buildCollectionPath(guidebookRootPath: string, collectionName: string): string {
-	return `${guidebookRootPath}/${collectionName}.md`;
+function buildCollectionPath(othersSettingPath: string, collectionName: string): string {
+	return `${othersSettingPath}/${collectionName}.md`;
 }
 
 async function promptCollectionName(
@@ -527,10 +675,47 @@ async function promptHeadingName(
 	});
 }
 
+async function promptFolderName(
+	app: App,
+	t: (key: TranslationKey) => string,
+	parentFolderPath: string,
+	options: {
+		title: string;
+		placeholder: string;
+		initialValue?: string;
+		validate?: (value: string) => string | null;
+	}
+): Promise<string | null> {
+	const parentFolder = app.vault.getFolderByPath(parentFolderPath);
+	const existingFolderNames = parentFolder
+		? parentFolder.children
+			.filter((c): c is TFolder => c instanceof TFolder)
+			.map(f => f.name)
+		: [];
+
+	return promptTextInput(app, {
+		title: options.title,
+		placeholder: options.placeholder,
+		initialValue: options.initialValue ?? "",
+		confirmText: t("settings.common.confirm"),
+		cancelText: t("settings.common.cancel"),
+		normalize: (value) => value.trim(),
+		validate: (value) => {
+			if (!value) return t("feature.guidebook.validation.empty");
+			if (/[\\/:*?"<>|]/.test(value)) return "无效文件夹名";
+			if (existingFolderNames.includes(value)) return "分类已存在!";
+			const externalValidate = options?.validate;
+			if (externalValidate) return externalValidate(value);
+			return null;
+		},
+	});
+}
+
 async function promptSettingName(
 	app: App,
 	t: (key: TranslationKey) => string,
-	file: TFile,
+	file: TFile | TFolder,
+	isH2: boolean,
 	treeData: GuidebookTreeData | null,
 	options: {
 		title: string;
@@ -539,18 +724,46 @@ async function promptSettingName(
 		ignoreTitle?: string;
 	},
 ): Promise<string | null> {
-	const existingTitles = await collectAllCollectionH2Titles(app, file, treeData, options.ignoreTitle);
-	return promptHeadingName(app, t, {
-		...options,
-		validate: (value) =>
-			existingTitles.has(value) ? t("feature.guidebook.validation.exists") : null,
-	});
+	if (file instanceof TFile) {
+		if (isH2) {
+			const existingTitles = await collectAllCollectionH2Titles(app, file, treeData, options.ignoreTitle);
+			return promptHeadingName(app, t, {
+				...options,
+				validate: (value) =>
+					existingTitles.has(value) ? t("feature.guidebook.validation.exists") : null,
+			});
+		} else {
+			logger.debug("Not H2");
+			let filepath: string = "";
+			if (file.parent) {
+				filepath = file.parent.path;
+			}
+			const name = promptCollectionName(app, t,
+				{
+					...options,
+					validate: (normalizedName) => {
+						const targetPath = buildCollectionPath(filepath, normalizedName);
+						return !app.vault.getAbstractFileByPath(targetPath);
+					},
+				});
+			return name;
+		}
+	} else {
+		const existingFolders = getSubfolderNames(app, file.path);
+		return promptFolderName(app, t,
+			file.path,
+			{
+				...options,
+				validate: (value) =>
+					existingFolders.includes(value) ? t("feature.guidebook.validation.exists") : null,
+			});
+	}
 }
 
 async function promptCategoryName(
 	app: App,
 	t: (key: TranslationKey) => string,
-	file: TFile,
+	f: TFile | TFolder,//done 添加适配了TFolder类型
 	treeData: GuidebookTreeData | null,
 	options: {
 		title: string;
@@ -559,14 +772,40 @@ async function promptCategoryName(
 		ignoreTitle?: string;
 	},
 ): Promise<string | null> {
-	const existingTitles = await collectAllCollectionH1Titles(app, file, treeData, options.ignoreTitle);
-	return promptHeadingName(app, t, {
-		...options,
-		validate: (value) =>
-			existingTitles.has(value) ? t("feature.guidebook.validation.exists") : null,
-	});
+	if (f instanceof TFile) {
+		const existingTitles = await collectAllCollectionH1Titles(app, f, treeData, options.ignoreTitle);
+		return promptHeadingName(app, t, {
+			...options,
+			validate: (value) =>
+				existingTitles.has(value) ? t("feature.guidebook.validation.exists") : null,
+		});
+	} else {
+		//done 需要判断是一级目录还是二级目录
+		let existingFolders: string[] = [];
+		if (f.parent && f.parent.name === '设定库') {
+			existingFolders = getSubfolderNames(app, f.path);
+		} else if (f.parent) {
+			existingFolders = getSubfolderNames(app, f.parent.path);
+		}
+		return promptFolderName(app, t,
+			f.path,
+			{
+				...options,
+				validate: (value) => existingFolders.includes(value) ? t("feature.guidebook.validation.exists") : null
+			});
+	}
 }
 
+/**
+ * 向指定文件的 Markdown 内容中追加一个 H1 标题（即 categoryName），
+ * 并在执行前进行唯一性检查，确保该标题在全局范围内不重复。
+ *
+ * 唯一性检查包括两个层面：
+ * 1. 基于已有数据源（通过 `collectAllCollectionH1Titles` 收集的所有标题，例如文件中已存在的标题以及 treeData 中记录的标题）。
+ * 2. 在写入文件前，再次实时读取文件当前内容，确认其中不包含同名 H1 标题。
+ *
+ * 若任一检查发现重复，则抛出错误，不会修改文件内容。
+ **/
 async function appendH1WithUniquenessCheck(
 	app: App,
 	file: TFile,
@@ -583,6 +822,19 @@ async function appendH1WithUniquenessCheck(
 		}
 		return appendH1(content, categoryName);
 	});
+}
+
+async function createSubFolders(
+	app: App,
+	folder: TFolder,
+	treeData: GuidebookTreeData | null,
+	categoryName: string
+): Promise<void> {
+	const fullPath = `${folder.path}/${categoryName}`;
+	if (app.vault.getFolderByPath(fullPath)) {
+		throw new Error(`Folder "${fullPath}" already exists`);
+	}
+	await app.vault.createFolder(fullPath);
 }
 
 async function appendH2WithUniquenessCheck(
@@ -722,6 +974,22 @@ async function collectAllCollectionH1Titles(
 		titles.delete(normalizedExcludeTitle);
 	}
 	return titles;
+}
+
+function getSubfolderNames(app: App, folderPath: string): string[] {
+	const folder = app.vault.getFolderByPath(folderPath);
+	if (!folder) return [];
+	return folder.children
+		.filter((d): d is TFolder => d instanceof TFolder)
+		.map(subfolder => subfolder.name);
+}
+
+function getSubfileNames(app: App, folderPath: string): string[] {
+	const folder = app.vault.getFolderByPath(folderPath);
+	if (!folder) return [];
+	return folder.children
+		.filter((f): f is TFile => f instanceof TFile)
+		.map(file => file.name);
 }
 
 function resolveCollectionFilesForUniquenessCheck(

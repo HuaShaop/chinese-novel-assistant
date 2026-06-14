@@ -7,7 +7,6 @@ export function listVaultFilesInFolder(app: App, folderPath: string): TFile[] {
 	if (!(root instanceof TFolder)) {
 		return [];
 	}
-
 	const files: TFile[] = [];
 	collectFiles(root, files);
 	return files;

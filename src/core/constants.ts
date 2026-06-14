@@ -57,3 +57,9 @@ export const STICKY_NOTE_COLORS = [
 	"#F05D6C",
 	"#9CA3AF",
 ] as const;
+
+export const SETTING_FOLDERS = {
+	character: "人物设定",
+	faction: "势力设定",
+	location: "地点设定",
+} as const;

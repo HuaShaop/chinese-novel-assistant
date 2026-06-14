@@ -93,6 +93,7 @@ export function createGuidebookTreeViewComponent(
 	return new GuidebookTreeView(containerEl, options);
 }
 
+//done switch diff nodes and functions
 class GuidebookTreeView implements GuidebookTreeViewComponent {
 	private readonly viewportEl: HTMLElement;
 	private readonly rootEl: HTMLElement;

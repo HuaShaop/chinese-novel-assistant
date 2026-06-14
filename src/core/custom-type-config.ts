@@ -214,7 +214,6 @@ function resolveCustomTypes(rawValue: unknown, defaults: readonly CustomTypeSett
 			? rawItem["label"].trim()
 			: key;
 		const colorHex = normalizeColorHex(rawItem["colorHex"]) ?? "#9CA3AF";
-		logger.debug("key:",key,"label:",label);
         resolved.push({
             key,
             label,

@@ -92,7 +92,6 @@ export function renderAnnotationCardItem(deps: AnnotationCardItemDeps): () => vo
 			confirmText: deps.t("settings.common.confirm"),
 			cancelText: deps.t("settings.common.cancel"),
 		});
-		logger.debug("card.title", card.title);
 		if (newTitle !== null && newTitle !== card.title) {
 			card.title = newTitle;
 			card.updatedAt = Date.now();

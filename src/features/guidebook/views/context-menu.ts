@@ -1,11 +1,10 @@
 import { UI } from "../../../core";
-import { showContextMenuAtMouseEvent } from "../../../ui";
+import { ContextMenuOption, showContextMenuAtMouseEvent } from "../../../ui";
 import type {
 	GuidebookTreeFileNode,
 	GuidebookTreeH1Node,
 	GuidebookTreeH2Node,
 } from "../tree-builder";
-
 export type GuidebookTreeFileContextAction =
 	| "create_collection"
 	| "create_category"
@@ -43,29 +42,34 @@ export function openGuidebookFileContextMenu(
 	fileNode: GuidebookTreeFileNode,
 	onAction?: (action: GuidebookTreeFileContextAction, fileNode: GuidebookTreeFileNode) => void,
 ): void {
-	showContextMenuAtMouseEvent(event, [
-		{
-			title: menuLabels.createCollection,
-			icon: UI.ICON.FILE,
-			onClick: () => onAction?.("create_collection", fileNode),
-		},
-		{
-			title: menuLabels.createCategory,
-			icon: UI.ICON.H1,
-			onClick: () => onAction?.("create_category", fileNode),
-		},
-		{
-			title: menuLabels.renameCollection,
-			icon: UI.ICON.PENCIL,
-			onClick: () => onAction?.("rename_collection", fileNode),
-		},
-		{
-			title: menuLabels.deleteCollection,
-			icon: UI.ICON.DELETE,
-			warning: true,
-			onClick: () => onAction?.("delete_collection", fileNode),
-		},
-	]);
+	const menuItems: ContextMenuOption[] = [];
+	if (!fileNode.isSpecific) {
+		menuItems.push(
+			{
+				title: menuLabels.renameCollection,
+				icon: UI.ICON.PENCIL,
+				onClick: () => onAction?.("rename_collection", fileNode),
+			},
+			{
+				title: menuLabels.deleteCollection,
+				icon: UI.ICON.DELETE,
+				warning: true,
+				onClick: () => onAction?.("delete_collection", fileNode),
+			},
+		)
+	};
+	// done : show different menus for different node types 
+	// {
+	// 	title: menuLabels.createCollection,
+	// 	icon: UI.ICON.FILE,
+	// 	onClick: () => onAction?.("create_collection", fileNode),
+	// },
+	menuItems.push({
+		title: menuLabels.createCategory,
+		icon: UI.ICON.H1,
+		onClick: () => onAction?.("create_category", fileNode),
+	});
+	showContextMenuAtMouseEvent(event, menuItems);
 }
 
 export function openGuidebookH1ContextMenu(

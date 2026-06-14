@@ -8,7 +8,7 @@ import {
 
 export const DEFAULT_CHAPTER_NAME_FORMAT = "第{num}章 ";
 export const DEFAULT_CHAPTER_TEMPLATE =
-`---
+	`---
 vol_idx: ""
 ch_idx: "{num}"
 synopsis: ""
@@ -83,12 +83,11 @@ export interface SettingDatas {
 	enableCharacterCount: boolean;
 	enableCharacterMilestone: boolean;
 	countOnlyNovelLibrary: boolean;
-	
+
 	// 设定视图节点排序、展开与折叠数据
 	guidebookCollectionOrders: Record<string, string[]>;
 	guidebookTreeExpandedStates: Record<string, boolean>;
 	guidebookTreeAllExpanded: boolean;
-
 	// 新建章节模板
 	chapterTemplate: string;
 }

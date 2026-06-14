@@ -11,10 +11,26 @@ import {
 	handleGuidebookH2ContextAction,
 } from "../menu-actions";
 import { handleGuidebookTreeDragMove } from "../drag-sort-actions";
+import { logger } from "../../../utils/logger";
 
 let cachedMarkdownFilePath: string | null = null;
 
+/**
+ * 渲染指南手册侧边栏面板。
+ * 
+ * 该函数创建并管理整个指南手册树形视图的 UI，包括：
+ * - 标题栏与工具栏（展开/折叠按钮、搜索框）
+ * - 动态加载和刷新树状数据
+ * - 处理文件/章节的右键菜单操作（新建、重命名、删除、拖拽排序）
+ * - 监听仓库变化（文件重命名、内容修改）并自动刷新
+ * - 持久化树节点的展开/折叠状态
+ * 
+ * @param containerEl - 侧边栏的父容器元素
+ * @param ctx - 插件上下文，包含 app、设置、国际化等工具
+ * @returns 清理函数，用于卸载时释放资源
+ */
 export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: PluginContext): () => void {
+	// ============ 1. 创建 DOM 结构（根容器、头部、搜索区、滚动区） ============
 	const rootEl = containerEl.createDiv({ cls: "cna-right-sidebar-guidebook" });
 	const headerEl = rootEl.createDiv({ cls: "cna-right-sidebar-guidebook__header" });
 	headerEl.createDiv({ cls: "cna-right-sidebar-guidebook__header-spacer" });
@@ -28,20 +44,24 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 	const contentEl = rootEl.createDiv({ cls: "cna-right-sidebar-guidebook__content" });
 	const searchWrapEl = contentEl.createDiv({ cls: "cna-right-sidebar-guidebook__search-wrap" });
 	const scrollEl = contentEl.createDiv({ cls: "cna-right-sidebar-guidebook__scroll" });
+
+	// ============ 2. 状态变量定义 ============
 	let searchKeyword = "";
 	let searchCountEl: HTMLElement | null = null;
 	let latestTreeData: GuidebookTreeData | null = null;
-	const initialSettings = ctx.settings;
-	const rawExpandedState = initialSettings.guidebookTreeExpandedStates ?? {};
-	const initialExpandedState = filterGuidebookTreeExpandedState(rawExpandedState);
-	const initialAllExpanded = initialSettings.guidebookTreeAllExpanded ?? true;
-	if (!areExpandedStateRecordsEqual(rawExpandedState, initialExpandedState)) {
-		void ctx.setSettings({
-			guidebookTreeExpandedStates: initialExpandedState,
-		});
-	}
 	let persistExpandedStateTimer: number | null = null;
 	let pendingExpandedState: GuidebookTreeExpandedStateSnapshot | null = null;
+	let isDisposed = false;
+	let refreshSeq = 0;
+	let refreshTimer: number | null = null;
+	let renderedTreeSignature: string | null = null;
+	let hasRenderedTree = false;
+	let lastMarkdownFilePath = resolveActiveMarkdownFilePath(ctx) ?? cachedMarkdownFilePath;
+	if (lastMarkdownFilePath) {
+		cachedMarkdownFilePath = lastMarkdownFilePath;
+	}
+
+	// ============ 3. 辅助函数：持久化展开状态（防抖） ============
 	const schedulePersistExpandedState = (snapshot: GuidebookTreeExpandedStateSnapshot): void => {
 		pendingExpandedState = snapshot;
 		if (persistExpandedStateTimer !== null) {
@@ -51,9 +71,7 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 			persistExpandedStateTimer = null;
 			const nextSnapshot = pendingExpandedState;
 			pendingExpandedState = null;
-			if (!nextSnapshot) {
-				return;
-			}
+			if (!nextSnapshot) return;
 			const settings = ctx.settings;
 			if (
 				settings.guidebookTreeAllExpanded === nextSnapshot.allExpanded &&
@@ -67,6 +85,17 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 			});
 		}, 120);
 	};
+
+	// ============ 4. 恢复/初始化树展开状态 ============
+	const rawExpandedState = ctx.settings.guidebookTreeExpandedStates ?? {};
+	const initialExpandedState = filterGuidebookTreeExpandedState(rawExpandedState);
+	const initialAllExpanded = ctx.settings.guidebookTreeAllExpanded ?? true;
+	if (!areExpandedStateRecordsEqual(rawExpandedState, initialExpandedState)) {
+		void ctx.setSettings({ guidebookTreeExpandedStates: initialExpandedState });
+	}
+
+	// ============ 5. 创建树形视图组件（注册所有右键菜单回调） ============
+	//done: 处理右键event的不同表现
 	const treeView = createGuidebookTreeViewComponent(scrollEl, {
 		menuLabels: {
 			createCollection: ctx.t("feature.guidebook.menu.create_collection"),
@@ -83,55 +112,34 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 		onFileContextAction: (action, fileNode) => {
 			void (async () => {
 				const changed = await handleGuidebookFileContextAction(
-					{
-						app: ctx.app,
-						t: (key) => ctx.t(key),
-						treeData: latestTreeData,
-						openFileInNewTab: ctx.settings.openFileInNewTab,
-					},
+					{ app: ctx.app, t: (key) => ctx.t(key), treeData: latestTreeData, openFileInNewTab: ctx.settings.openFileInNewTab },
 					action,
 					fileNode,
 				);
-				if (changed) {
-					void refreshGuidebook();
-				}
+				if (changed) void refreshGuidebook();
 			})();
 		},
 		onH1ContextAction: (action, fileNode, h1Node) => {
 			void (async () => {
 				const changed = await handleGuidebookH1ContextAction(
-					{
-						app: ctx.app,
-						t: (key) => ctx.t(key),
-						treeData: latestTreeData,
-						openFileInNewTab: ctx.settings.openFileInNewTab,
-					},
+					{ app: ctx.app, t: (key) => ctx.t(key), treeData: latestTreeData, openFileInNewTab: ctx.settings.openFileInNewTab },
 					action,
 					fileNode,
 					h1Node,
 				);
-				if (changed) {
-					void refreshGuidebook();
-				}
+				if (changed) void refreshGuidebook();
 			})();
 		},
 		onH2ContextAction: (action, fileNode, h1Node, h2Node) => {
 			void (async () => {
 				const changed = await handleGuidebookH2ContextAction(
-					{
-						app: ctx.app,
-						t: (key) => ctx.t(key),
-						treeData: latestTreeData,
-						openFileInNewTab: ctx.settings.openFileInNewTab,
-					},
+					{ app: ctx.app, t: (key) => ctx.t(key), treeData: latestTreeData, openFileInNewTab: ctx.settings.openFileInNewTab },
 					action,
 					fileNode,
 					h1Node,
 					h2Node,
 				);
-				if (changed) {
-					void refreshGuidebook();
-				}
+				if (changed) void refreshGuidebook();
 			})();
 		},
 		onBlankContextCreateCollection: () => {
@@ -142,33 +150,25 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 					treeData: latestTreeData,
 					openFileInNewTab: ctx.settings.openFileInNewTab,
 				});
-				if (changed) {
-					void refreshGuidebook();
-				}
+				if (changed) void refreshGuidebook();
 			})();
 		},
 		onMove: (request) => {
 			return (async () => {
 				const changed = await handleGuidebookTreeDragMove(
-					{
-						app: ctx.app,
-						t: (key) => ctx.t(key),
-						treeData: latestTreeData,
-						getSettings: () => ctx.settings,
-						setSettings: (patch) => ctx.setSettings(patch),
-					},
+					{ app: ctx.app, t: (key) => ctx.t(key), treeData: latestTreeData, getSettings: () => ctx.settings, setSettings: (patch) => ctx.setSettings(patch) },
 					request,
 				);
-				if (changed) {
-					void refreshGuidebook();
-				}
+				if (changed) void refreshGuidebook();
 				return changed;
 			})();
-			},
-			initialExpandedState,
-			initialAllExpanded,
-			onExpandedStateChange: schedulePersistExpandedState,
-		});
+		},
+		initialExpandedState,
+		initialAllExpanded,
+		onExpandedStateChange: schedulePersistExpandedState,
+	});
+
+	// ============ 6. 头部按钮：展开/折叠切换 ============
 	const toggleButton = new ToggleButtonComponent({
 		containerEl: headerEl,
 		className: "cna-right-sidebar-guidebook__toggle-button",
@@ -179,6 +179,8 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 		initialOn: initialAllExpanded,
 		onToggle: (isOn) => treeView.setAllExpanded(isOn),
 	});
+
+	// ============ 7. 搜索输入框组件与计数显示 ============
 	new ClearableInputComponent({
 		containerEl: searchWrapEl,
 		containerClassName: "cna-guidebook-search-input-container",
@@ -189,29 +191,17 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 		},
 	});
 	const searchInputContainerEl = searchWrapEl.querySelector<HTMLElement>(".cna-guidebook-search-input-container");
-	searchCountEl = searchInputContainerEl?.createSpan({
-		cls: "cna-guidebook-search-count",
-		text: "0",
-	}) ?? null;
+	searchCountEl = searchInputContainerEl?.createSpan({ cls: "cna-guidebook-search-count", text: "0" }) ?? null;
 	const searchInputEl = searchWrapEl.querySelector<HTMLInputElement>("input");
 	const searchClearButtonEl = searchWrapEl.querySelector<HTMLElement>(".search-input-clear-button");
 
-	const novelLibraryService = new NovelLibraryService(ctx.app);
-	let lastMarkdownFilePath = resolveActiveMarkdownFilePath(ctx) ?? cachedMarkdownFilePath;
-	if (lastMarkdownFilePath) {
-		cachedMarkdownFilePath = lastMarkdownFilePath;
-	}
-	let isDisposed = false;
-	let refreshSeq = 0;
-	let refreshTimer: number | null = null;
-	let renderedTreeSignature: string | null = null;
-	let hasRenderedTree = false;
+	// ============ 8. 内部函数：计算总 H2 数量 ============
 	const resolveTotalH2Count = (treeData: GuidebookTreeData | null): number => {
-		if (!treeData) {
-			return 0;
-		}
+		if (!treeData) return 0;
 		return treeData.files.reduce((total, fileNode) => total + fileNode.h2Count, 0);
 	};
+
+	// ============ 9. 内部函数：应用搜索过滤并渲染树 ============
 	const applySearchFilterAndRender = (forceRender = false): void => {
 		const { treeData: filteredTreeData, matchedH2Count } = filterGuidebookTreeByKeyword(latestTreeData, searchKeyword);
 		const visibleCount = Math.max(0, matchedH2Count);
@@ -219,99 +209,89 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 		const hasFilter = searchKeyword.trim().length > 0;
 		searchCountEl?.setText(hasFilter ? `${visibleCount}/${totalCount}` : `${totalCount}`);
 		const treeSignature = buildGuidebookTreeSignature(filteredTreeData);
-		if (!forceRender && hasRenderedTree && treeSignature === renderedTreeSignature) {
-			return;
-		}
+		if (!forceRender && hasRenderedTree && treeSignature === renderedTreeSignature) return;
 		renderedTreeSignature = treeSignature;
 		hasRenderedTree = true;
 		treeView.renderData(filteredTreeData, ctx.t("feature.guidebook.tree.empty"));
 	};
+
+	// ============ 10. 内部函数：更新本地化文本（搜索框占位符等） ============
 	const updateLocalizedText = (): void => {
 		searchInputEl?.setAttr("placeholder", ctx.t("feature.guidebook.search.placeholder"));
 		searchClearButtonEl?.setAttr("aria-label", ctx.t("feature.guidebook.search.clear"));
 	};
 
+	// ============ 11. 内部函数：刷新指南手册数据（防抖内调用） ============
 	const refreshGuidebook = async (preferredFilePath?: string | null): Promise<void> => {
 		const nextFilePath = preferredFilePath ?? resolveActiveMarkdownFilePath(ctx) ?? lastMarkdownFilePath ?? cachedMarkdownFilePath;
 		if (nextFilePath) {
 			lastMarkdownFilePath = nextFilePath;
 			cachedMarkdownFilePath = nextFilePath;
 		}
-		titleTextEl.setText(resolveCurrentNovelLibraryName(ctx, novelLibraryService, nextFilePath));
+		titleTextEl.setText(resolveCurrentNovelLibraryName(ctx, new NovelLibraryService(ctx.app), nextFilePath));
 		const currentSeq = ++refreshSeq;
-		if (!hasRenderedTree) {
-			treeView.renderLoading(ctx.t("feature.guidebook.tree.loading"));
-		}
-
+		if (!hasRenderedTree) treeView.renderLoading(ctx.t("feature.guidebook.tree.loading"));
 		const treeData = (await loadGuidebookTreeData(ctx, nextFilePath ?? null)) ?? null;
-		if (isDisposed || currentSeq !== refreshSeq) {
-			return;
-		}
+		if (isDisposed || currentSeq !== refreshSeq) return;
 		latestTreeData = treeData;
 		applySearchFilterAndRender();
 	};
+
+	// ============ 12. 内部函数：调度刷新（防抖） ============
 	const scheduleRefresh = (preferredFilePath?: string | null): void => {
-		if (refreshTimer !== null) {
-			window.clearTimeout(refreshTimer);
-		}
+		if (refreshTimer !== null) window.clearTimeout(refreshTimer);
 		refreshTimer = window.setTimeout(() => {
 			refreshTimer = null;
 			void refreshGuidebook(preferredFilePath);
 		}, 120);
 	};
+
+	// ============ 13. 初始渲染与本地化 ============
 	updateLocalizedText();
 	void refreshGuidebook();
 
+	// ============ 14. 设置工作区事件监听（文件打开、活动叶子变化） ============
 	const workspaceEventRefs = [
 		ctx.app.workspace.on("file-open", (file) => {
 			scheduleRefresh(file?.path ?? null);
 		}),
 		ctx.app.workspace.on("active-leaf-change", (leaf) => {
 			const markdownView = leaf?.view;
-			if (!(markdownView instanceof MarkdownView)) {
-				return;
-			}
+			if (!(markdownView instanceof MarkdownView)) return;
 			scheduleRefresh(markdownView.file?.path ?? null);
 		}),
 	];
 
+	// ============ 15. 设置仓库变化监听（文件/文件夹重命名、内容修改） ============
 	const disposeVaultWatcher = watchVaultChanges(ctx.app, (event) => {
 		if (event.type === "rename" && event.file instanceof TFolder) {
-			if (shouldRefreshForLibraryFolderRename(event, ctx, novelLibraryService)) {
+			if (shouldRefreshForLibraryFolderRename(event, ctx, new NovelLibraryService(ctx.app))) {
 				scheduleRefresh(event.path);
 			}
 			return;
 		}
-		if (!isMarkdownFile(event.file)) {
-			return;
-		}
-		if (shouldRefreshForVaultEvent(event, ctx, novelLibraryService, latestTreeData, lastMarkdownFilePath)) {
+		if (!isMarkdownFile(event.file)) return;
+		if (shouldRefreshForVaultEvent(event, ctx, new NovelLibraryService(ctx.app), latestTreeData, lastMarkdownFilePath)) {
 			scheduleRefresh();
 		}
 	});
 
+	// ============ 16. 设置设置变更监听（语言、排序等变化时刷新） ============
 	const disposeSettingsChange = ctx.onSettingsChange(() => {
 		updateLocalizedText();
 		applySearchFilterAndRender(true);
 		void refreshGuidebook();
 	});
 
+	// ============ 17. 返回清理函数，释放所有资源 ============
 	return () => {
 		isDisposed = true;
 		refreshSeq += 1;
-			if (refreshTimer !== null) {
-				window.clearTimeout(refreshTimer);
-				refreshTimer = null;
-			}
-			if (persistExpandedStateTimer !== null) {
-				window.clearTimeout(persistExpandedStateTimer);
-				persistExpandedStateTimer = null;
-			}
-			toggleButton.destroy();
-			treeView.destroy();
-		for (const eventRef of workspaceEventRefs) {
-			ctx.app.workspace.offref(eventRef);
-		}
+		if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+		if (persistExpandedStateTimer !== null) window.clearTimeout(persistExpandedStateTimer);
+		toggleButton.destroy();
+		treeView.destroy();
+		for (const eventRef of workspaceEventRefs) ctx.app.workspace.offref(eventRef);
 		disposeVaultWatcher();
 		disposeSettingsChange();
 	};

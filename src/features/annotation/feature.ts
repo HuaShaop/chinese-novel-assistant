@@ -181,7 +181,6 @@ class AnnotationFeature {
 				title??this.ctx.t("feature.annotation.default_title"),
 				colorHex,
 			);
-			logger.debug("cardTitle:",title??this.ctx.t("feature.annotation.default_title"));
 			const normalizedPath = normalizeVaultPath(sourcePath);
 			this.anchorSnapshotsBySourcePath.delete(normalizedPath);
 			this.loadedAnchorPaths.delete(normalizedPath);
