@@ -14,7 +14,6 @@ import {
 	resolveAnnotationTypeTitle,
 } from "./color-types";
 import { logger } from "../../utils/logger";
-logger.setPrefix("annotation-feature")
 
 const ANNOTATION_RANGE_FORCE_REFRESH = Annotation.define<boolean>();
 const ANNOTATION_RANGE_MARK_CLASS = "cna-annotation-range-mark";

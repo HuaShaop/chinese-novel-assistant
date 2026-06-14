@@ -26,8 +26,7 @@ export default class CNAPlugin extends Plugin {
 	private ctx: PluginContext | null = null;
 
 	async onload(): Promise<void> {
-		logger.setPrefix("CNAPlugin");
-		logger.info("loading...");
+		logger.info("CNAplugin loading...");
 		await this.loadSettings();
 
 		this.ctx = createPluginContext(this.createContextHost());

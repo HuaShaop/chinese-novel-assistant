@@ -15,6 +15,7 @@ export interface GuidebookTreeH2Node {
 	h1IndexInSource: number;
 	h2IndexInH1: number;
 	isSpecific: boolean;
+	type: 'markdown-h2' | 'markdown-file';
 }
 
 export interface GuidebookTreeH1Node {
@@ -25,6 +26,7 @@ export interface GuidebookTreeH1Node {
 	sourceFileMtime: number;
 	h1IndexInSource: number;
 	isSpecific: boolean;
+	type: 'markdown-h1' | 'subfolder';
 }
 
 export interface GuidebookTreeFileNode {
@@ -34,6 +36,7 @@ export interface GuidebookTreeFileNode {
 	h1List: GuidebookTreeH1Node[];
 	h2Count: number;
 	isSpecific: boolean;
+	type: 'markdown-file' | 'folder';
 }
 
 export interface GuidebookTreeData {
@@ -127,13 +130,15 @@ function mapParsedGuidebookTree(
 			sourceFileMtime,
 			h1IndexInSource: h2Node.h1IndexInSource,
 			h2IndexInH1: h2Node.h2IndexInH1,
-			isSpecific: false
+			isSpecific: false,
+			type:'markdown-h2'
 		})),
 		sourcePath,
 		sourceFileCtime,
 		sourceFileMtime,
 		h1IndexInSource: h1Node.h1IndexInSource,
-		isSpecific: false
+		isSpecific: false,
+		type:'markdown-h1'
 	}));
 }
 
@@ -198,6 +203,7 @@ async function processOtherSettingsFolder(app: App, guidebookRootPath: string): 
 				h2Count: 0,
 				firstFileCtime: file.stat.ctime,
 				isSpecific: false,
+				type: 'markdown-file',
 			};
 			fileBucketByName.set(fileNameKey, bucket);
 		}
@@ -220,7 +226,8 @@ async function processOtherSettingsFolder(app: App, guidebookRootPath: string): 
 		sourcePaths: bucket.sourcePaths,
 		h1List: bucket.h1List,
 		h2Count: bucket.h2Count,
-		isSpecific: false
+		isSpecific: false,
+		type:'markdown-file'
 	}));
 	logger.debug("fileNodes:", fileNodes);
 	return fileNodes;
@@ -253,7 +260,8 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 				sourcePaths: [specialFolderPath],
 				h1List: [],
 				h2Count: 0,
-				isSpecific: true
+				isSpecific: true,
+				type:'folder',
 			});
 			continue;
 		}
@@ -273,7 +281,8 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 				sourceFileMtime: file.stat.mtime,
 				h1IndexInSource: 0,
 				h2IndexInH1: idx,
-				isSpecific: true
+				isSpecific: true,
+				type:'markdown-file',
 			}));
 
 			const folderStats = await getFolderStats(app, subfolder);
@@ -284,7 +293,8 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 				sourceFileCtime: folderStats.ctime,
 				sourceFileMtime: folderStats.mtime,
 				h1IndexInSource: h1List.length,
-				isSpecific: true
+				isSpecific: true,
+				type:'subfolder',
 			};
 			h1List.push(h1Node);
 			totalH2Count += h2List.length;
@@ -296,7 +306,8 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 			sourcePaths: [specialFolderPath],
 			h1List,
 			h2Count: totalH2Count,
-			isSpecific: true
+			isSpecific: true,
+			type:"folder"
 		});
 		// }
 	}

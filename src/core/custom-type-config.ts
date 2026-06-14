@@ -3,7 +3,6 @@ import { isRecord, parseColorHex } from "../utils";
 import { STICKY_NOTE_COLORS } from "./constants";
 import { logger } from "../utils/logger";
 
-logger.setPrefix("custom-type-config");
 export type CustomTypeKey =
 	| "summary"
 	| "foreshadow"

@@ -43,6 +43,11 @@ export function openGuidebookFileContextMenu(
 	onAction?: (action: GuidebookTreeFileContextAction, fileNode: GuidebookTreeFileNode) => void,
 ): void {
 	const menuItems: ContextMenuOption[] = [];
+		menuItems.push({
+		title: menuLabels.createCategory,
+		icon: UI.ICON.H1,
+		onClick: () => onAction?.("create_category", fileNode),
+		});
 	if (!fileNode.isSpecific) {
 		menuItems.push(
 			{
@@ -64,11 +69,7 @@ export function openGuidebookFileContextMenu(
 	// 	icon: UI.ICON.FILE,
 	// 	onClick: () => onAction?.("create_collection", fileNode),
 	// },
-	menuItems.push({
-		title: menuLabels.createCategory,
-		icon: UI.ICON.H1,
-		onClick: () => onAction?.("create_category", fileNode),
-	});
+
 	showContextMenuAtMouseEvent(event, menuItems);
 }
 
