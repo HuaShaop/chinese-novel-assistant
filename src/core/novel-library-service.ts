@@ -62,7 +62,7 @@ export function normalizeFileName(filename: string): string {
 	if (trimmed.length === 0) {
 		throw new Error("Filename cannot be empty");
 	}
-	return trimmed.replace(/[\\/:*?"<>|]/g, '-'); 
+	return trimmed.replace(/[\\/:*?"<>|]/g, '-');
 }
 
 /**
@@ -284,7 +284,7 @@ export class NovelLibraryService {
 		}
 		for (const guidebookSubdirKey of GUIDEBOOK_SUBDIR_KEYS) {
 			await this.ensureFolderPath(
-				this.normalizeVaultPath(`${guidebookRootPath}/${guidebookSubdirKey}`),
+				this.normalizeVaultPath(`${guidebookRootPath}/${GUIDEBOOK_SUBDIR_NAMES[guidebookSubdirKey]}`),
 			);
 		}
 	}
@@ -318,7 +318,7 @@ export class NovelLibraryService {
 	 * 支持预定义 key 的别名匹配（大小写不敏感）。
 	 * @param subdirName - 原始子目录名
 	 * @returns 实际目录名（若未匹配则返回原输入）
- 	*/
+	  */
 	private resolveSubdirName(subdirName: string): string {
 		const normalizedInput = this.normalizeVaultPath(subdirName);
 		const normalizedInputLower = normalizedInput.toLowerCase();

@@ -109,9 +109,24 @@ export function renderGlobalSettings(containerEl: HTMLElement, deps: SettingsTab
 					if (!shouldDelete) {
 						return;
 					}
+					const settings = ctx.settings;
+					const orders = settings.guidebookCollectionOrders;
+					const states = settings.guidebookTreeExpandedStates;
+					if (orders) {
+						for (const key of Object.keys(orders)) {
+							if (key.startsWith(libraryPath)) delete orders[key];
+						}
+					}
+					if (states) {
+						for (const key of Object.keys(states)) {
+							if (key.startsWith(libraryPath)) delete states[key];
+						}
+					}
 
 					await ctx.setSettings({
 						novelLibraries: ctx.settings.novelLibraries.filter((value) => value !== libraryPath),
+						guidebookCollectionOrders: settings.guidebookCollectionOrders,
+						guidebookTreeExpandedStates: settings.guidebookTreeExpandedStates,
 					});
 					refresh();
 				});
