@@ -15,7 +15,7 @@ export interface GuidebookTreeH2Node {
 	h1IndexInSource: number;
 	h2IndexInH1: number;
 	isSpecific: boolean;
-	type: 'markdown-h2' | 'markdown-file';
+	type: 'markdown-h2' | 'markdown-info-file';
 }
 
 export interface GuidebookTreeH1Node {
@@ -131,14 +131,14 @@ function mapParsedGuidebookTree(
 			h1IndexInSource: h2Node.h1IndexInSource,
 			h2IndexInH1: h2Node.h2IndexInH1,
 			isSpecific: false,
-			type:'markdown-h2'
+			type: 'markdown-h2'
 		})),
 		sourcePath,
 		sourceFileCtime,
 		sourceFileMtime,
 		h1IndexInSource: h1Node.h1IndexInSource,
 		isSpecific: false,
-		type:'markdown-h1'
+		type: 'markdown-h1'
 	}));
 }
 
@@ -227,9 +227,9 @@ async function processOtherSettingsFolder(app: App, guidebookRootPath: string): 
 		h1List: bucket.h1List,
 		h2Count: bucket.h2Count,
 		isSpecific: false,
-		type:'markdown-file'
+		type: 'markdown-file'
 	}));
-	logger.debug("fileNodes:", fileNodes);
+	// logger.debug("fileNodes:", fileNodes);
 	return fileNodes;
 }
 
@@ -261,7 +261,7 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 				h1List: [],
 				h2Count: 0,
 				isSpecific: true,
-				type:'folder',
+				type: 'folder',
 			});
 			continue;
 		}
@@ -282,7 +282,7 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 				h1IndexInSource: 0,
 				h2IndexInH1: idx,
 				isSpecific: true,
-				type:'markdown-file',
+				type: 'markdown-info-file',
 			}));
 
 			const folderStats = await getFolderStats(app, subfolder);
@@ -294,7 +294,7 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 				sourceFileMtime: folderStats.mtime,
 				h1IndexInSource: h1List.length,
 				isSpecific: true,
-				type:'subfolder',
+				type: 'subfolder',
 			};
 			h1List.push(h1Node);
 			totalH2Count += h2List.length;
@@ -307,11 +307,11 @@ async function processSpecialFolders(app: App, guidebookRootPath: string): Promi
 			h1List,
 			h2Count: totalH2Count,
 			isSpecific: true,
-			type:"folder"
+			type: "folder"
 		});
 		// }
 	}
-	logger.debug("specialFileNodes", specialFileNodes)
+	// logger.debug("specialFileNodes", specialFileNodes)
 	return specialFileNodes;
 }
 
@@ -356,9 +356,8 @@ function sortFileNodesByOrder(
 	fileNodes: GuidebookTreeFileNode[],
 	collectionOrderMap: Map<string, number>
 ): GuidebookTreeFileNode[] {
-	//todo: 优化文件排序逻辑|固定文件夹置顶
+	//done: 优化文件排序逻辑|固定文件夹置顶
 	return fileNodes.sort((a, b) => {
-		//有关固定文件夹的排序
 		const aIndex = SPECIAL_FOLDERS.indexOf(a.fileName);
 		const bIndex = SPECIAL_FOLDERS.indexOf(b.fileName);
 		if (aIndex !== -1 && bIndex !== -1) {
@@ -413,7 +412,6 @@ export async function buildGuidebookTreeData(
 	// ---------- 3. 检查缓存是否命中 ----------
 	const cachedTree = guidebookTreeCacheByRootPath.get(guidebookRootPath);
 	if (cachedTree && cachedTree.signature === guidebookFileSignature && cachedTree.orderedSourcePathsKey === orderedSourcePathsKey) {
-		logger.debug("Datatree has been cached.")
 		return cachedTree.data;
 	}
 

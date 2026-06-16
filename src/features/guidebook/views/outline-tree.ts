@@ -17,6 +17,7 @@ import {
 	type GuidebookTreeH1ContextAction,
 	type GuidebookTreeH2ContextAction,
 } from "./context-menu";
+import { logger } from "../../../utils/logger";
 
 export interface GuidebookTreeViewComponent {
 	setAllExpanded(expanded: boolean): void;
@@ -53,20 +54,20 @@ interface GuidebookTreeViewOptions {
 
 type DragTreeNodePayload =
 	| {
-			kind: "file";
-			fileNode: GuidebookTreeFileNode;
-	  }
+		kind: "markdown-file" | "folder";
+		fileNode: GuidebookTreeFileNode;
+	}
 	| {
-			kind: "h1";
-			fileNode: GuidebookTreeFileNode;
-			h1Node: GuidebookTreeH1Node;
-	  }
+		kind: "markdown-h1" | "subfolder";
+		fileNode: GuidebookTreeFileNode;
+		h1Node: GuidebookTreeH1Node;
+	}
 	| {
-			kind: "h2";
-			fileNode: GuidebookTreeFileNode;
-			h1Node: GuidebookTreeH1Node;
-			h2Node: GuidebookTreeH2Node;
-	  };
+		kind: "markdown-h2" | "markdown-info-file";
+		fileNode: GuidebookTreeFileNode;
+		h1Node: GuidebookTreeH1Node;
+		h2Node: GuidebookTreeH2Node;
+	};
 
 type DropIndicator = "before" | "after" | "inside";
 const INACTIVE_STATUS_PATTERN = /【状态】\s*(死亡|失效)/;
@@ -175,21 +176,21 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 				fileBranchEl,
 				{
 					label: fileNode.fileName,
-					icon: UI.ICON.FILE,
+					icon: fileNode.isSpecific ? UI.ICON.FOLDER : UI.ICON.FILE,
 					count: fileNode.h2Count,
-					levelClass: "cna-guidebook-tree__row--file",
+					levelClass: `cna-guidebook-tree__row--file ${fileNode.isSpecific ? 'cna-guidebook-tree__row--file-specific' : ''}`,
 					onContextMenu: (event) => {
 						openGuidebookFileContextMenu(event, this.options.menuLabels, fileNode, this.options.onFileContextAction);
 					},
 				},
 				fileKey,
 			);
-			this.bindDragAndDrop(fileRender.rowEl, { kind: "file", fileNode });
+			this.bindDragAndDrop(fileRender.rowEl, { kind: fileNode.type, fileNode });
 			const fileChildrenEl = fileRender.childrenEl;
 
-				fileNode.h1List.forEach((h1Node) => {
-					this.renderH1Node(fileChildrenEl, data.libraryRootPath, fileNode, h1Node, knownScopeKeys);
-				});
+			fileNode.h1List.forEach((h1Node) => {
+				this.renderH1Node(fileChildrenEl, data.libraryRootPath, fileNode, h1Node, knownScopeKeys);
+			});
 		});
 		this.pruneExpandedStateByScope(scopeKeyPrefix, knownScopeKeys);
 	}
@@ -215,7 +216,7 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 			h1BranchEl,
 			{
 				label: h1Node.title,
-				icon: UI.ICON.H1,
+				icon: h1Node.isSpecific ? UI.ICON.FOLDER : UI.ICON.H1,
 				count: h1Node.h2List.length,
 				levelClass: "cna-guidebook-tree__row--h1",
 				onContextMenu: (event) => {
@@ -230,7 +231,7 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 			},
 			h1Key,
 		);
-		this.bindDragAndDrop(h1Render.rowEl, { kind: "h1", fileNode, h1Node });
+		this.bindDragAndDrop(h1Render.rowEl, { kind: h1Node.type, fileNode, h1Node });
 		const h1ChildrenEl = h1Render.childrenEl;
 
 		h1Node.h2List.forEach((h2Node) => {
@@ -244,44 +245,34 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 		h1Node: GuidebookTreeH1Node,
 		h2Node: GuidebookTreeH2Node,
 	): void {
-		const rowEl = containerEl.createDiv({ cls: "cna-guidebook-tree__row cna-guidebook-tree__row--h2" });
 		const normalizedKeyword = h2Node.title.trim();
-		if (normalizedKeyword.length > 0) {
-			const previewItem: SidebarGuidebookPreviewItemPayload = {
-				keyword: normalizedKeyword,
-				title: h2Node.title,
-				categoryTitle: h1Node.title,
-				content: h2Node.content,
-				sourcePath: h2Node.sourcePath,
-			};
-			(rowEl as unknown as SidebarPreviewCarrierElement)[SIDEBAR_PREVIEW_ITEM_PROP] = previewItem;
-		}
-		rowEl.createDiv({ cls: "cna-guidebook-tree__row-toggle cna-guidebook-tree__row-toggle--placeholder" });
+		const previewItem = normalizedKeyword.length > 0 ? {
+			keyword: normalizedKeyword,
+			title: h2Node.title,
+			categoryTitle: h1Node.title,
+			content: h2Node.content,
+			sourcePath: h2Node.sourcePath,
+		} : undefined;
 
-		const iconEl = rowEl.createSpan({ cls: "cna-guidebook-tree__row-icon" });
-		setIcon(iconEl, UI.ICON.H2);
-
-		const labelEl = rowEl.createSpan({
-			cls: "cna-guidebook-tree__row-label",
-			text: h2Node.title,
-		});
-		if (INACTIVE_STATUS_PATTERN.test(h2Node.content)) {
-			rowEl.addClass("is-inactive-status");
-			labelEl.addClass("is-inactive-status");
+		this.renderLeafRow(containerEl, {
+			icon: h2Node.isSpecific ? UI.ICON.FILE : UI.ICON.H2,
+			label: h2Node.title,
+			levelClass: "cna-guidebook-tree__row--h2",
+			previewItem,
+			isInactive: INACTIVE_STATUS_PATTERN.test(h2Node.content),
+			onContextMenu: (event: MouseEvent) => {
+				openGuidebookH2ContextMenu(
+					event,
+					this.options.menuLabels,
+					fileNode,
+					h1Node,
+					h2Node,
+					this.options.onH2ContextAction,
+				);
+			},
+			dragPayload: { kind: h2Node.type, fileNode, h1Node, h2Node },
 		}
-		rowEl.addEventListener("contextmenu", (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			openGuidebookH2ContextMenu(
-				event,
-				this.options.menuLabels,
-				fileNode,
-				h1Node,
-				h2Node,
-				this.options.onH2ContextAction,
-			);
-		});
-		this.bindDragAndDrop(rowEl, { kind: "h2", fileNode, h1Node, h2Node });
+		)
 	}
 
 	private renderCollapsibleRow(
@@ -349,6 +340,57 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 		};
 	}
 
+	/**
+	 * 渲染不可折叠的叶子节点行（如 H2 节点）
+	 * @param containerEl 父容器元素
+	 * @param options 配置项
+	 * @param options.icon 图标名称（Obsidian 图标库）
+	 * @param options.label 显示文本
+	 * @param options.levelClass 行元素的样式类
+	 * @param options.previewItem 可选，挂载的预览数据（用于侧边栏预览）
+	 * @param options.isInactive 可选，是否标记为失效状态
+	 * @param options.onContextMenu 可选，右键菜单回调
+	 * @param options.dragPayload 拖拽负载数据
+	 * @returns 创建的行元素
+	 */
+	private renderLeafRow(
+		containerEl: HTMLElement,
+		options: {
+			icon: string;
+			label: string;
+			levelClass: string;
+			previewItem?: SidebarGuidebookPreviewItemPayload;
+			isInactive?: boolean;
+			onContextMenu?: (event: MouseEvent) => void;
+			dragPayload: DragTreeNodePayload;
+		}
+	): HTMLElement {
+		const rowEl = containerEl.createDiv({ cls: `cna-guidebook-tree__row ${options.levelClass}` });
+		if (options.previewItem) {
+			(rowEl as unknown as SidebarPreviewCarrierElement)[SIDEBAR_PREVIEW_ITEM_PROP] = options.previewItem;
+		}
+		rowEl.createDiv({ cls: "cna-guidebook-tree__row-toggle cna-guidebook-tree__row-toggle--placeholder" });
+		const iconEl = rowEl.createSpan({ cls: "cna-guidebook-tree__row-icon" });
+		setIcon(iconEl, options.icon);
+		const labelEl = rowEl.createSpan({
+			cls: "cna-guidebook-tree__row-label",
+			text: options.label,
+		});
+		if (options.isInactive) {
+			rowEl.addClass("is-inactive-status");
+			labelEl.addClass("is-inactive-status");
+		}
+		if (options.onContextMenu) {
+			rowEl.addEventListener("contextmenu", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				options.onContextMenu?.(event);
+			});
+		}
+		this.bindDragAndDrop(rowEl, options.dragPayload);
+		return rowEl;
+	}
+
 	private bindDragAndDrop(rowEl: HTMLElement, targetPayload: DragTreeNodePayload): void {
 		if (!this.options.onMove) {
 			return;
@@ -412,53 +454,57 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 	}
 
 	private isDraggable(payload: DragTreeNodePayload): boolean {
-		if (payload.kind === "file") {
+		if (payload.kind === "folder") {
+			return false;
+		} else if (payload.kind === "markdown-file") {
 			return payload.fileNode.sourcePaths.length === 1;
+		} else {
+			return true;
 		}
-		return true;
 	}
 
+	//处理拖拽渲染逻辑
 	private resolveMoveRequest(
 		dragPayload: DragTreeNodePayload,
 		targetPayload: DragTreeNodePayload,
 		rowEl: HTMLElement,
 		event: DragEvent | MouseEvent,
 	): GuidebookTreeDragMoveRequest | null {
-		if (dragPayload.kind === "file") {
+		if (dragPayload.kind === "markdown-file") {
 			if (
-				targetPayload.kind !== "file" ||
+				targetPayload.kind !== "markdown-file" ||
 				dragPayload.fileNode === targetPayload.fileNode ||
 				targetPayload.fileNode.sourcePaths.length !== 1
 			) {
 				return null;
 			}
 			return {
-				kind: "file",
+				kind: "markdown-file",
 				sourceFileNode: dragPayload.fileNode,
 				targetFileNode: targetPayload.fileNode,
 				position: this.resolveBeforeAfter(rowEl, event),
 			};
 		}
 
-		if (dragPayload.kind === "h1") {
-			if (targetPayload.kind === "file") {
+		if (dragPayload.kind === "markdown-h1") {
+			if (targetPayload.kind === "markdown-file") {
 				if (targetPayload.fileNode.sourcePaths.length !== 1) {
 					return null;
 				}
 				return {
-					kind: "h1",
+					kind: "markdown-h1",
 					sourceFileNode: dragPayload.fileNode,
 					sourceH1Node: dragPayload.h1Node,
 					targetFileNode: targetPayload.fileNode,
 					position: "inside",
 				};
 			}
-			if (targetPayload.kind === "h1") {
+			if (targetPayload.kind === "markdown-h1") {
 				if (dragPayload.h1Node === targetPayload.h1Node) {
 					return null;
 				}
 				return {
-					kind: "h1",
+					kind: "markdown-h1",
 					sourceFileNode: dragPayload.fileNode,
 					sourceH1Node: dragPayload.h1Node,
 					targetFileNode: targetPayload.fileNode,
@@ -469,32 +515,92 @@ class GuidebookTreeView implements GuidebookTreeViewComponent {
 			return null;
 		}
 
-		if (targetPayload.kind === "h1") {
-			return {
-				kind: "h2",
-				sourceFileNode: dragPayload.fileNode,
-				sourceH1Node: dragPayload.h1Node,
-				sourceH2Node: dragPayload.h2Node,
-				targetFileNode: targetPayload.fileNode,
-				targetH1Node: targetPayload.h1Node,
-				position: "inside",
-			};
-		}
-		if (targetPayload.kind === "h2") {
-			if (dragPayload.h2Node === targetPayload.h2Node) {
-				return null;
+		if (dragPayload.kind === "markdown-h2") {
+			if (targetPayload.kind === "markdown-h1") {
+				return {
+					kind: "markdown-h2",
+					sourceFileNode: dragPayload.fileNode,
+					sourceH1Node: dragPayload.h1Node,
+					sourceH2Node: dragPayload.h2Node,
+					targetFileNode: targetPayload.fileNode,
+					targetH1Node: targetPayload.h1Node,
+					position: "inside",
+				};
 			}
-			return {
-				kind: "h2",
-				sourceFileNode: dragPayload.fileNode,
-				sourceH1Node: dragPayload.h1Node,
-				sourceH2Node: dragPayload.h2Node,
-				targetFileNode: targetPayload.fileNode,
-				targetH1Node: targetPayload.h1Node,
-				targetH2Node: targetPayload.h2Node,
-				position: this.resolveBeforeAfter(rowEl, event),
-			};
+			if (targetPayload.kind === "markdown-h2") {
+				if (dragPayload.h2Node === targetPayload.h2Node) {
+					return null;
+				}
+				return {
+					kind: "markdown-h2",
+					sourceFileNode: dragPayload.fileNode,
+					sourceH1Node: dragPayload.h1Node,
+					sourceH2Node: dragPayload.h2Node,
+					targetFileNode: targetPayload.fileNode,
+					targetH1Node: targetPayload.h1Node,
+					targetH2Node: targetPayload.h2Node,
+					position: this.resolveBeforeAfter(rowEl, event),
+				};
+			}
 		}
+
+		if (dragPayload.kind === "subfolder") {
+			if (targetPayload.kind === "folder") {
+				if (targetPayload.fileNode.sourcePaths.length !== 1) {
+					return null;
+				}
+				return {
+					kind: "subfolder",
+					sourceFileNode: dragPayload.fileNode,
+					sourceH1Node: dragPayload.h1Node,
+					targetFileNode: targetPayload.fileNode,
+					position: "inside",
+				};
+			}
+			if (targetPayload.kind === "subfolder") {
+				if (dragPayload.h1Node === targetPayload.h1Node) {
+					return null;
+				}
+				return {
+					kind: "subfolder",
+					sourceFileNode: dragPayload.fileNode,
+					sourceH1Node: dragPayload.h1Node,
+					targetFileNode: targetPayload.fileNode,
+					targetH1Node: targetPayload.h1Node,
+					position: this.resolveBeforeAfter(rowEl, event),
+				};
+			}
+		}
+
+		if (dragPayload.kind === "markdown-info-file") {
+			if (targetPayload.kind === "subfolder") {
+				return {
+					kind: "markdown-info-file",
+					sourceFileNode: dragPayload.fileNode,
+					sourceH1Node: dragPayload.h1Node,
+					sourceH2Node: dragPayload.h2Node,
+					targetFileNode: targetPayload.fileNode,
+					targetH1Node: targetPayload.h1Node,
+					position: "inside",
+				};
+			}
+			if (targetPayload.kind === "markdown-info-file") {
+				if (dragPayload.h2Node === targetPayload.h2Node) {
+					return null;
+				}
+				return {
+					kind: "markdown-info-file",
+					sourceFileNode: dragPayload.fileNode,
+					sourceH1Node: dragPayload.h1Node,
+					sourceH2Node: dragPayload.h2Node,
+					targetFileNode: targetPayload.fileNode,
+					targetH1Node: targetPayload.h1Node,
+					targetH2Node: targetPayload.h2Node,
+					position: this.resolveBeforeAfter(rowEl, event),
+				};
+			}
+		}
+
 		return null;
 	}
 

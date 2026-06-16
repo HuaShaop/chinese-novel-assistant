@@ -52,30 +52,30 @@ export class Logger {
         this.disabledLevels.delete(level);
     }
 
-    public debug(message: string, ...args: unknown[]): void {
-        this.output(LogLevel.DEBUG, undefined, message, ...args);
+    public debug(...args: unknown[]): void {
+        this.output(LogLevel.DEBUG, undefined, ...args);
     }
 
-    public info(message: string, ...args: unknown[]): void {
-        this.output(LogLevel.INFO, undefined, message, ...args);
+    public info(...args: unknown[]): void {
+        this.output(LogLevel.INFO, undefined, ...args);
     }
 
-    public warn(message: string, ...args: unknown[]): void {
-        this.output(LogLevel.WARN, undefined, message, ...args);
+    public warn(...args: unknown[]): void {
+        this.output(LogLevel.WARN, undefined, ...args);
     }
 
-    public error(message: string, ...args: unknown[]): void {
-        this.output(LogLevel.ERROR, undefined, message, ...args);
+    public error(...args: unknown[]): void {
+        this.output(LogLevel.ERROR, undefined, ...args);
     }
 
-    public debugWithPrefix(prefix: string, message: string, ...args: unknown[]): void {
-        this.output(LogLevel.DEBUG, prefix, message, ...args);
+    public debugWithPrefix(prefix: string, ...args: unknown[]): void {
+        this.output(LogLevel.DEBUG, prefix, ...args);
     }
-    public infoWithPrefix(prefix: string, message: string, ...args: unknown[]): void {
-        this.output(LogLevel.INFO, prefix, message, ...args);
+    public infoWithPrefix(prefix: string, ...args: unknown[]): void {
+        this.output(LogLevel.INFO, prefix, ...args);
     }
-    public warnWithPrefix(prefix: string, message: string, ...args: unknown[]): void {
-        this.output(LogLevel.WARN, prefix, message, ...args);
+    public warnWithPrefix(prefix: string, ...args: unknown[]): void {
+        this.output(LogLevel.WARN, prefix, ...args);
     }
     /**
      * 打印变量名和值（debug 级别）

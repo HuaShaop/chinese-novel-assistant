@@ -264,7 +264,7 @@ export function renderGuidebookSidebarPanel(containerEl: HTMLElement, ctx: Plugi
 
 	// ============ 15. 设置仓库变化监听（文件/文件夹重命名、内容修改） ============
 	const disposeVaultWatcher = watchVaultChanges(ctx.app, (event) => {
-		if (event.type === "rename" && event.file instanceof TFolder) {
+		if (event.file instanceof TFolder) {
 			if (shouldRefreshForLibraryFolderRename(event, ctx, new NovelLibraryService(ctx.app))) {
 				scheduleRefresh(event.path);
 			}

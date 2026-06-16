@@ -23,6 +23,7 @@ data.json
 .DS_Store
 dev-guidelines.md
 AGENTS.md
+.todo
 
 # Releas
 release

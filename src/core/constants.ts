@@ -4,6 +4,7 @@ export const UI = {
 		STICKY_NOTE: "lightbulb",
 		SPARKLES: "sparkles",
 		FILE: "file-text",
+		FOLDER: "folder-closed",
 		H1: "heading-1",
 		H2: "heading-2",
 		H3: "heading-3",
@@ -57,9 +58,3 @@ export const STICKY_NOTE_COLORS = [
 	"#F05D6C",
 	"#9CA3AF",
 ] as const;
-
-export const SETTING_FOLDERS = {
-	character: "人物设定",
-	faction: "势力设定",
-	location: "地点设定",
-} as const;

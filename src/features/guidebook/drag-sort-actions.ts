@@ -9,34 +9,35 @@ import type {
 	GuidebookTreeH1Node,
 	GuidebookTreeH2Node,
 } from "./tree-builder";
+import { logger } from "../../utils/logger";
 
 type DragDropPosition = "before" | "after" | "inside";
 
 export type GuidebookTreeDragMoveRequest =
 	| {
-			kind: "file";
-			sourceFileNode: GuidebookTreeFileNode;
-			targetFileNode: GuidebookTreeFileNode;
-			position: Exclude<DragDropPosition, "inside">;
-	  }
+		kind: "markdown-file" | "folder";
+		sourceFileNode: GuidebookTreeFileNode;
+		targetFileNode: GuidebookTreeFileNode;
+		position: Exclude<DragDropPosition, "inside">;
+	}
 	| {
-			kind: "h1";
-			sourceFileNode: GuidebookTreeFileNode;
-			sourceH1Node: GuidebookTreeH1Node;
-			targetFileNode: GuidebookTreeFileNode;
-			targetH1Node?: GuidebookTreeH1Node;
-			position: DragDropPosition;
-	  }
+		kind: "markdown-h1" | "subfolder";
+		sourceFileNode: GuidebookTreeFileNode;
+		sourceH1Node: GuidebookTreeH1Node;
+		targetFileNode: GuidebookTreeFileNode;
+		targetH1Node?: GuidebookTreeH1Node;
+		position: DragDropPosition;
+	}
 	| {
-			kind: "h2";
-			sourceFileNode: GuidebookTreeFileNode;
-			sourceH1Node: GuidebookTreeH1Node;
-			sourceH2Node: GuidebookTreeH2Node;
-			targetFileNode: GuidebookTreeFileNode;
-			targetH1Node: GuidebookTreeH1Node;
-			targetH2Node?: GuidebookTreeH2Node;
-			position: DragDropPosition;
-	  };
+		kind: "markdown-h2" | "markdown-info-file";
+		sourceFileNode: GuidebookTreeFileNode;
+		sourceH1Node: GuidebookTreeH1Node;
+		sourceH2Node: GuidebookTreeH2Node;
+		targetFileNode: GuidebookTreeFileNode;
+		targetH1Node: GuidebookTreeH1Node;
+		targetH2Node?: GuidebookTreeH2Node;
+		position: DragDropPosition;
+	};
 
 export interface GuidebookTreeDragSortContext {
 	app: App;
@@ -53,12 +54,16 @@ export async function handleGuidebookTreeDragMove(
 	request: GuidebookTreeDragMoveRequest,
 ): Promise<boolean> {
 	switch (request.kind) {
-		case "file":
+		case "markdown-file":
 			return handleCollectionMove(context, request);
-		case "h1":
+		case "markdown-h1":
 			return handleH1Move(context, request);
-		case "h2":
+		case "markdown-h2":
 			return handleH2Move(context, request);
+		case "subfolder":
+			return handleSubfolderMove(context, request);
+		case "markdown-info-file":
+			return handleInfoFileMove(context, request);
 		default:
 			return false;
 	}
@@ -66,7 +71,7 @@ export async function handleGuidebookTreeDragMove(
 
 async function handleCollectionMove(
 	context: GuidebookTreeDragSortContext,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "file" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-file" | "folder" }>,
 ): Promise<boolean> {
 	const guidebookRootPath = context.treeData?.guidebookRootPath;
 	if (!guidebookRootPath) {
@@ -98,7 +103,7 @@ async function handleCollectionMove(
 
 async function handleH1Move(
 	context: GuidebookTreeDragSortContext,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h1" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h1" | "subfolder" }>,
 ): Promise<boolean> {
 	const sourceFile = resolveCollectionFileByPath(context.app, request.sourceH1Node.sourcePath);
 	if (!sourceFile) {
@@ -147,7 +152,7 @@ async function handleH1Move(
 
 async function handleH2Move(
 	context: GuidebookTreeDragSortContext,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h2" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h2" | "markdown-info-file" }>,
 ): Promise<boolean> {
 	const sourceFile = resolveCollectionFileByPath(context.app, request.sourceH2Node.sourcePath);
 	const targetFile = resolveCollectionFileByPath(context.app, request.targetH1Node.sourcePath);
@@ -183,9 +188,103 @@ async function handleH2Move(
 	}
 }
 
+async function handleSubfolderMove(
+	context: GuidebookTreeDragSortContext,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h1" | "subfolder" }>,
+): Promise<boolean> {
+	if (request.kind !== "subfolder") {
+		return false;
+	}
+	const sourceSubfolder = context.app.vault.getFolderByPath(request.sourceH1Node.sourcePath);
+	if (!sourceSubfolder) {
+		new Notice("No source-Subfolder found.");
+		return false;
+	}
+	const targetFolderPath = request.targetFileNode.sourcePaths[0];
+	if (!targetFolderPath) return false;
+	const targetFolder = context.app.vault.getFolderByPath(targetFolderPath);
+	if (!targetFolder) {
+		new Notice("No target-Folder found.");
+		return false;
+	}
+	if (sourceSubfolder.parent?.path === targetFolder.path) {
+		return false;
+	}
+	let newPath: string;
+	const subfolderName = sourceSubfolder.name;
+
+	if (request.position === "inside" || request.position === "before" || request.position === "after") {
+		newPath = `${targetFolderPath}/${subfolderName}`;
+	} else {
+		return false;
+	}
+
+	if (context.app.vault.getFolderByPath(newPath)) {
+		new Notice("Already exists.");
+		return false;
+	}
+
+	try {
+		await context.app.vault.rename(sourceSubfolder, newPath);
+		return true;
+	} catch (error) {
+		logger.errorUnknown(error);
+		new Notice(context.t("feature.guidebook.notice.action_failed"));
+		return false;
+	}
+}
+
+async function handleInfoFileMove(
+	context: GuidebookTreeDragSortContext,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h2" | "markdown-info-file" }>,
+) {
+	const sourcePath = request.sourceH2Node.sourcePath;
+	if (!sourcePath) {
+		new Notice(context.t("feature.guidebook.notice.node_not_found"));
+		return false;
+	}
+	const sourceFile = resolveCollectionFileByPath(context.app, sourcePath);
+	if (!sourceFile) {
+		new Notice(context.t("feature.guidebook.notice.node_not_found"));
+		return false;
+	}
+	const targetFolderPath = request.targetH1Node.sourcePath;
+	if (!targetFolderPath) {
+		new Notice(context.t("feature.guidebook.notice.collection_multi_source_unsupported"));
+		return false;
+	}
+	const targetFolder = context.app.vault.getFolderByPath(targetFolderPath);
+	if (!targetFolder) {
+		new Notice(context.t("feature.guidebook.notice.node_not_found"));
+		return false;
+	}
+
+	if (request.sourceH1Node.sourcePath === targetFolder.path) {
+		return false;
+	}
+
+	const newPath = `${targetFolder.path}/${sourceFile.name}`;
+	if (newPath === sourcePath) {
+		return true;
+	}
+	if (context.app.vault.getFileByPath(newPath)) {
+		new Notice("Same named file already exsits.");
+		return false;
+	}
+
+	try {
+		await context.app.fileManager.renameFile(sourceFile, newPath);
+		return true;
+	} catch (error) {
+		console.error(error);
+		new Notice(context.t("feature.guidebook.notice.action_failed"));
+		return false;
+	}
+}
+
 function moveH1WithinContent(
 	content: string,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h1" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h1" | "subfolder" }>,
 ): string {
 	const lines = splitLines(content);
 	const parsed = markdownParser.parseSections(content);
@@ -200,7 +299,7 @@ function moveH1WithinContent(
 
 function moveH2WithinContent(
 	content: string,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h2" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h2" | "markdown-info-file" }>,
 ): string {
 	const lines = splitLines(content);
 	const parsed = markdownParser.parseSections(content);
@@ -217,7 +316,7 @@ function moveH2WithinContent(
 function moveH1AcrossContents(
 	sourceContent: string,
 	targetContent: string,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h1" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h1" | "subfolder" }>,
 ): { sourceContent: string; targetContent: string } | null {
 	const sourceLines = splitLines(sourceContent);
 	const sourceParsed = markdownParser.parseSections(sourceContent);
@@ -245,7 +344,7 @@ function moveH1AcrossContents(
 function moveH2AcrossContents(
 	sourceContent: string,
 	targetContent: string,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h2" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h2" | "markdown-info-file" }>,
 ): { sourceContent: string; targetContent: string } | null {
 	const sourceLines = splitLines(sourceContent);
 	const sourceParsed = markdownParser.parseSections(sourceContent);
@@ -274,7 +373,7 @@ function moveH2AcrossContents(
 function resolveH1InsertLine(
 	contentLineCount: number,
 	parsed: ReturnType<GuidebookMarkdownParser["parseSections"]>,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h1" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h1" | "subfolder" }>,
 ): number {
 	if (request.position === "inside") {
 		return contentLineCount;
@@ -292,7 +391,7 @@ function resolveH1InsertLine(
 
 function resolveH2InsertLine(
 	parsed: ReturnType<GuidebookMarkdownParser["parseSections"]>,
-	request: Extract<GuidebookTreeDragMoveRequest, { kind: "h2" }>,
+	request: Extract<GuidebookTreeDragMoveRequest, { kind: "markdown-h2" | "markdown-info-file" }>,
 ): number {
 	const targetH1 = parsed.h1Sections[request.targetH1Node.h1IndexInSource];
 	if (!targetH1) {

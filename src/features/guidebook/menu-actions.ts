@@ -179,7 +179,7 @@ function markdownExecutor(
 		createSetting: async (hNode) => {
 			const file = resolveCollectionFileByPath(app, hNode.sourcePath);
 			if (!file) throw new Error("file not found");
-			const settingName = await promptSettingName(app, t, file, hNode.type as "markdown-h1"|"markdown-h2", treeData, {
+			const settingName = await promptSettingName(app, t, file, hNode.type as "markdown-h1" | "markdown-h2", treeData, {
 				title: t("feature.guidebook.dialog.create_setting.title"),
 				placeholder: t("feature.guidebook.dialog.setting_name.placeholder"),
 				initialValue: "",
@@ -449,8 +449,6 @@ export async function handleGuidebookFileContextAction(
 		logger.errorUnknown(error);
 		new Notice(t("feature.guidebook.notice.action_failed"));
 		return false;
-	} finally {
-		return true;
 	}
 }
 
@@ -519,24 +517,88 @@ export async function handleGuidebookH2ContextAction(
 	}
 }
 
+/**
+ * 将选中的文本作为新词条（H2）添加到指南手册文件的指定分类（H1）下，或者根据 isSpecial 创建独立文件
+ * @param context 操作上下文
+ * @param sourcePath 源路径：普通模式下为 Markdown 文件路径；特殊模式下为文件夹路径
+ * @param h1IndexInSource 目标 H1 索引（普通模式使用）
+ * @param settingName 设定名称（普通模式下为 H2 标题，特殊模式下作为文件名的备选）
+ * @param h1Title H1 标题（特殊模式下用作文件名）
+ * @param isSpecial 是否为特殊模式，若为 true 则在 sourcePath 文件夹下创建独立 Markdown 文件
+ */
 export async function appendGuidebookSettingToCategoryByPath(
 	context: GuidebookActionContext,
 	sourcePath: string,
 	h1IndexInSource: number,
 	settingName: string,
-	h1Title?: string
+	h1Title?: string,
+	isSpecial?: boolean,
 ): Promise<boolean> {
 	const { app, t, treeData } = context;
+
+	// ========== 特殊模式：在文件夹下创建独立 Markdown 文件 ==========
+	if (isSpecial) {
+		// 验证 sourcePath 是否为文件夹
+		const folder = app.vault.getFolderByPath(sourcePath);
+		if (!folder) {
+			new Notice(t("feature.guidebook.notice.node_not_found"));
+			return false;
+		}
+		// 确定文件名：优先使用 h1Title，回退到 settingName
+		const fileName = settingName.trim();
+		if (!fileName) {
+			new Notice(t("feature.guidebook.validation.empty"));
+			return false;
+		}
+		// 校验文件名合法性
+		if (/[\\/:*?"<>|]/.test(fileName)) {
+			new Notice(t("feature.guidebook.validation.invalid_name"));
+			return false;
+		}
+		const filePath = `${folder.path}/${fileName}.md`;
+		if (app.vault.getAbstractFileByPath(filePath)) {
+			new Notice(t("feature.guidebook.validation.exists"));
+			return false;
+		}
+		// 根据父文件夹名称选择模板
+		let template = "";
+		const parentFolderName = folder.parent?.name;
+		switch (parentFolderName) {
+			case "人物设定":
+				template = characterTemplate;
+				break;
+			case "势力设定":
+				template = factionTemplate;
+				break;
+			case "地点设定":
+				template = locationTemplate;
+				break;
+			default:
+				template = ""; // 无模板则创建空文件
+		}
+		try {
+			await app.vault.create(filePath, template);
+			return true;
+		} catch (error) {
+			console.error(error);
+			new Notice(t("feature.guidebook.notice.action_failed"));
+			return false;
+		}
+	}
+
+	// ========== 普通模式：向现有 Markdown 文件追加 H2 条目 ==========
 	const file = resolveCollectionFileByPath(app, sourcePath);
 	if (!file) {
 		new Notice(t("feature.guidebook.notice.node_not_found"));
 		return false;
 	}
+
 	const normalizedSettingName = settingName.trim();
 	if (normalizedSettingName.length === 0) {
 		new Notice(t("feature.guidebook.validation.empty"));
 		return false;
 	}
+
 	try {
 		let targetH1Index = h1IndexInSource;
 		const normalizedH1Title = h1Title?.trim();

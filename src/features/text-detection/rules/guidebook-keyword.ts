@@ -1,10 +1,11 @@
 import type { EditorView } from "@codemirror/view";
-import { MarkdownView, TFile, type Plugin } from "obsidian";
+import { MarkdownView, TFile, TFolder, type Plugin } from "obsidian";
 import { GuidebookMarkdownParser } from "../../guidebook";
 import { collectGuidebookAliases } from "../../guidebook/alias-utils";
-import { NovelLibraryService, NOVEL_LIBRARY_SUBDIR_NAMES, type SettingDatas, listMarkdownFilesInFolder } from "../../../core";
+import { NovelLibraryService, NOVEL_LIBRARY_SUBDIR_NAMES, GUIDEBOOK_SUBDIR_NAMES, type SettingDatas, listMarkdownFilesInFolder } from "../../../core";
 import { resolveMarkdownViewByEditorView } from "../../../utils";
 import type { TextDetectionRange, TextDetectionRule } from "../engine";
+import { logger } from "../../../utils/logger";
 
 const GUIDEBOOK_KEYWORD_HIT_CLASS = "cna-guidebook-keyword-hit";
 const GUIDEBOOK_KEYWORD_BACKGROUND_VAR = "--cna-guidebook-keyword-background-color";
@@ -58,6 +59,11 @@ export class GuidebookKeywordHighlightController {
 	private guidebookKeywordRefreshTimer: number | null = null;
 	private keywordCacheVersion = 0;
 	private isDisposed = false;
+	private readonly mappedDirs = [
+		GUIDEBOOK_SUBDIR_NAMES.characterSetting,
+		GUIDEBOOK_SUBDIR_NAMES.factionSetting,
+		GUIDEBOOK_SUBDIR_NAMES.locationSetting,
+	];
 
 	constructor(
 		plugin: Plugin,
@@ -372,8 +378,29 @@ export class GuidebookKeywordHighlightController {
 		}
 	}
 
+	private isPathInOtherSetting(filePath: string, guidebookRootPath: string): boolean {
+		const otherSettingDir = `${guidebookRootPath}/${GUIDEBOOK_SUBDIR_NAMES.otherSetting}`;
+		return filePath.startsWith(otherSettingDir);
+	}
+
+	private isPathInFolderMappedSetting(filePath: string, guidebookRootPath: string): boolean {
+		for (const dir of this.mappedDirs) {
+			const dirPath = `${guidebookRootPath}/${dir}`;
+			if (filePath.startsWith(dirPath)) {
+				// 确保至少有一层子文件夹（即设定目录后还有路径分隔符）
+				const relative = filePath.slice(dirPath.length + 1);
+				if (relative.includes('/')) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// ========== 修改后的 collectGuidebookKeywordIndex ==========
 	private async collectGuidebookKeywordIndex(libraryRootPath: string): Promise<GuidebookLibraryKeywordIndex> {
-		const guidebookRootPath = this.novelLibraryService.resolveNovelLibrarySubdirPath(libraryRootPath,
+		const guidebookRootPath = this.novelLibraryService.resolveNovelLibrarySubdirPath(
+			libraryRootPath,
 			NOVEL_LIBRARY_SUBDIR_NAMES.guidebook,
 		);
 		if (!guidebookRootPath) {
@@ -384,54 +411,273 @@ export class GuidebookKeywordHighlightController {
 			};
 		}
 
-		const guidebookMarkdownFiles = listMarkdownFilesInFolder(this.plugin.app, guidebookRootPath)
-			.sort((left, right) => left.stat.ctime - right.stat.ctime || left.path.localeCompare(right.path));
+		const allMarkdownFiles: TFile[] = [];
+		// 1. 其他设定：直接收集所有 .md 文件
+		const otherSettingPath = `${guidebookRootPath}/${GUIDEBOOK_SUBDIR_NAMES.otherSetting}`;
+		const otherSettingFiles = listMarkdownFilesInFolder(this.plugin.app, otherSettingPath);
+		allMarkdownFiles.push(...otherSettingFiles);
+		// 2. 人物设定、势力设定、地点设定：收集子文件夹中的 .md 文件
+		for (const dir of this.mappedDirs) {
+			const dirPath = `${guidebookRootPath}/${dir}`;
+			const dirAbstract = this.plugin.app.vault.getAbstractFileByPath(dirPath);
+			if (dirAbstract instanceof TFolder) {
+				for (const child of dirAbstract.children) {
+					if (child instanceof TFolder) {
+						const mdFiles = listMarkdownFilesInFolder(this.plugin.app, child.path);
+						allMarkdownFiles.push(...mdFiles);
+					}
+				}
+			}
+		}
+
+		// 按 ctime 排序
+		allMarkdownFiles.sort((a, b) => a.stat.ctime - b.stat.ctime || a.path.localeCompare(b.path));
 
 		const keywordSet = new Set<string>();
 		const keywordMatchGroups: string[][] = [];
 		const groupedKeywordSet = new Set<string>();
-		const previewByKeyword = new Map<string, GuidebookKeywordPreviewItem>();
+		const previewsByKeyword = new Map<string, GuidebookKeywordPreviewItem>();
 		const activeGuidebookPaths = new Set<string>();
-		for (const file of guidebookMarkdownFiles) {
+
+		for (const file of allMarkdownFiles) {
 			activeGuidebookPaths.add(file.path);
-			const fileKeywordIndex = await this.resolveGuidebookFileKeywordIndex(file.path, file.stat.mtime, file.stat.size);
-			for (const title of fileKeywordIndex.keywords) {
-				keywordSet.add(title);
+			const fileKeywordIndex = await this.resolveGuidebookFileKeywordIndex(
+				file.path,
+				file.stat.mtime,
+				file.stat.size,
+			);
+			for (const kw of fileKeywordIndex.keywords) {
+				keywordSet.add(kw);
 			}
-			for (const [keyword, previewItem] of fileKeywordIndex.previewsByKeyword) {
-				if (!previewByKeyword.has(keyword)) {
-					previewByKeyword.set(keyword, previewItem);
+			for (const [kw, preview] of fileKeywordIndex.previewsByKeyword) {
+				if (!previewsByKeyword.has(kw)) {
+					previewsByKeyword.set(kw, preview);
 				}
 			}
 			for (const group of fileKeywordIndex.keywordMatchGroups) {
-				const nextGroup: string[] = [];
-				for (const keyword of group) {
-					if (groupedKeywordSet.has(keyword)) {
+				const uniqueGroup: string[] = [];
+				for (const kw of group) {
+					if (groupedKeywordSet.has(kw)) {
 						continue;
 					}
-					groupedKeywordSet.add(keyword);
-					nextGroup.push(keyword);
+					groupedKeywordSet.add(kw);
+					uniqueGroup.push(kw);
 				}
-				if (nextGroup.length > 0) {
-					keywordMatchGroups.push(sortKeywordsByPriority(nextGroup));
+				if (uniqueGroup.length > 0) {
+					keywordMatchGroups.push(sortKeywordsByPriority(uniqueGroup));
 				}
 			}
 		}
+
+		// 未分组的关键词单独成组
+		for (const kw of keywordSet) {
+			if (!groupedKeywordSet.has(kw)) {
+				keywordMatchGroups.push([kw]);
+				groupedKeywordSet.add(kw);
+			}
+		}
+
 		this.pruneGuidebookFileKeywordCache(guidebookRootPath, activeGuidebookPaths);
-		for (const keyword of keywordSet) {
-			if (groupedKeywordSet.has(keyword)) {
-				continue;
-			}
-			groupedKeywordSet.add(keyword);
-			keywordMatchGroups.push([keyword]);
-		}
 
 		return {
 			keywords: sortKeywordsByPriority(Array.from(keywordSet)),
 			keywordMatchGroups,
-			previewsByKeyword: previewByKeyword,
+			previewsByKeyword,
 		};
 	}
+
+	// ========== 修改后的 resolveGuidebookFileKeywordIndex ==========
+	private async resolveGuidebookFileKeywordIndex(
+		filePath: string,
+		mtime: number,
+		size: number,
+	): Promise<GuidebookFileKeywordCacheEntry> {
+		const cached = this.guidebookFileKeywordCacheByPath.get(filePath);
+		if (cached && cached.mtime === mtime && cached.size === size) {
+			return cached;
+		}
+
+		const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
+		if (!(file instanceof TFile)) {
+			return this.emptyCacheEntry(mtime, size);
+		}
+
+		// 确定 guidebookRootPath
+		const libraryRoot = this.resolveContainingLibraryRoot(filePath);
+		if (!libraryRoot) {
+			return this.emptyCacheEntry(mtime, size);
+		}
+		const guidebookRootPath = this.novelLibraryService.resolveNovelLibrarySubdirPath(
+			libraryRoot,
+			NOVEL_LIBRARY_SUBDIR_NAMES.guidebook,
+		);
+		if (!guidebookRootPath) {
+			return this.emptyCacheEntry(mtime, size);
+		}
+
+		let entry: GuidebookFileKeywordCacheEntry;
+		if (this.isPathInOtherSetting(filePath, guidebookRootPath)) {
+			entry = await this.parseFileInternal(file);
+		} else if (this.isPathInFolderMappedSetting(filePath, guidebookRootPath)) {
+			entry = await this.parseFileAsFolderMapped(file);
+		} else {
+			entry = this.emptyCacheEntry(mtime, size);
+		}
+
+		this.guidebookFileKeywordCacheByPath.set(filePath, entry);
+		return entry;
+	}
+
+	// ========== 原有解析逻辑抽离为 parseFileInternal ==========
+	private async parseFileInternal(file: TFile): Promise<GuidebookFileKeywordCacheEntry> {
+		const markdown = await this.plugin.app.vault.cachedRead(file);
+		const h1List = this.guidebookMarkdownParser.parseTree(markdown);
+		const settings = this.getSettings();
+		const keywordSet = new Set<string>();
+		const keywordMatchGroups: string[][] = [];
+		const groupedKeywordSet = new Set<string>();
+		const previewsByKeyword = new Map<string, GuidebookKeywordPreviewItem>();
+
+		for (const h1Node of h1List) {
+			for (const h2Node of h1Node.h2List) {
+				const keyword = h2Node.title.trim();
+				if (keyword.length === 0) {
+					continue;
+				}
+				const aliases = collectGuidebookAliases({
+					keyword,
+					content: h2Node.content,
+					enableWesternNameAutoAlias: settings.guidebookWesternNameAutoAliasEnabled,
+				});
+				const matchGroup = normalizeKeywordMatchGroup([keyword, ...aliases]);
+				const uniqueGroup: string[] = [];
+				for (const groupKeyword of matchGroup) {
+					keywordSet.add(groupKeyword);
+					if (!previewsByKeyword.has(groupKeyword)) {
+						previewsByKeyword.set(groupKeyword, {
+							keyword: groupKeyword,
+							title: h2Node.title,
+							categoryTitle: h1Node.title,
+							content: h2Node.content,
+							sourcePath: file.path,
+						});
+					}
+					if (groupedKeywordSet.has(groupKeyword)) {
+						continue;
+					}
+					groupedKeywordSet.add(groupKeyword);
+					uniqueGroup.push(groupKeyword);
+				}
+				if (uniqueGroup.length > 0) {
+					keywordMatchGroups.push(sortKeywordsByPriority(uniqueGroup));
+				}
+			}
+		}
+
+		for (const keyword of keywordSet) {
+			if (!groupedKeywordSet.has(keyword)) {
+				keywordMatchGroups.push([keyword]);
+				groupedKeywordSet.add(keyword);
+			}
+		}
+
+		return {
+			mtime: file.stat.mtime,
+			size: file.stat.size,
+			keywords: sortKeywordsByPriority(Array.from(keywordSet)),
+			keywordMatchGroups,
+			previewsByKeyword,
+		};
+	}
+
+	// ========== 新增解析逻辑：文件夹映射（人物/势力/地点设定） ==========
+	private async parseFileAsFolderMapped(file: TFile): Promise<GuidebookFileKeywordCacheEntry> {
+		const markdown = await this.plugin.app.vault.cachedRead(file);
+		const settings = this.getSettings();
+
+		// 提取分类和关键词
+		const libraryRoot = this.resolveContainingLibraryRoot(file.path);
+		if (!libraryRoot) {
+			return this.emptyCacheEntry(file.stat.mtime, file.stat.size);
+		}
+		const guidebookRootPath = this.novelLibraryService.resolveNovelLibrarySubdirPath(
+			libraryRoot,
+			NOVEL_LIBRARY_SUBDIR_NAMES.guidebook,
+		);
+		if (!guidebookRootPath) {
+			return this.emptyCacheEntry(file.stat.mtime, file.stat.size);
+		}
+
+		// 找到所属的设定目录
+		const mappedDirs = [
+			GUIDEBOOK_SUBDIR_NAMES.characterSetting,
+			GUIDEBOOK_SUBDIR_NAMES.factionSetting,
+			GUIDEBOOK_SUBDIR_NAMES.locationSetting,
+		];
+		let matchedDir: string | null = null;
+		let afterDirPath = '';
+		for (const dir of mappedDirs) {
+			const dirPath = `${guidebookRootPath}/${dir}`;
+			if (file.path.startsWith(dirPath)) {
+				matchedDir = dir;
+				afterDirPath = file.path.slice(dirPath.length + 1);
+				break;
+			}
+		}
+		if (!matchedDir || !afterDirPath.includes('/')) {
+			// 没有子文件夹，不符合预期结构
+			return this.emptyCacheEntry(file.stat.mtime, file.stat.size);
+		}
+
+		const parts = afterDirPath.split('/');
+		const categoryTitle = parts[0]??""; // 子文件夹名作为 H1
+		const keyword = parts.pop()?.replace(/\.md$/i, '').trim()??"";
+		if (keyword.length === 0) {
+			return this.emptyCacheEntry(file.stat.mtime, file.stat.size);
+		}
+
+		// 生成别名
+		const aliases = collectGuidebookAliases({
+			keyword,
+			content: markdown,
+			enableWesternNameAutoAlias: settings.guidebookWesternNameAutoAliasEnabled,
+		});
+		const matchGroup = normalizeKeywordMatchGroup([keyword, ...aliases]);
+
+		const keywordSet = new Set<string>(matchGroup);
+		const keywordMatchGroups: string[][] = [sortKeywordsByPriority(matchGroup)];
+		const previewsByKeyword = new Map<string, GuidebookKeywordPreviewItem>();
+
+		for (const groupKeyword of matchGroup) {
+			previewsByKeyword.set(groupKeyword, {
+				keyword: groupKeyword,
+				title: keyword,
+				categoryTitle,
+				content: markdown,
+				sourcePath: file.path,
+			});
+		}
+
+		return {
+			mtime: file.stat.mtime,
+			size: file.stat.size,
+			keywords: sortKeywordsByPriority(Array.from(keywordSet)),
+			keywordMatchGroups,
+			previewsByKeyword,
+		};
+	}
+
+	// ========== 辅助方法：返回空缓存条目 ==========
+	private emptyCacheEntry(mtime: number, size: number): GuidebookFileKeywordCacheEntry {
+		return {
+			mtime,
+			size,
+			keywords: [],
+			keywordMatchGroups: [],
+			previewsByKeyword: new Map(),
+		};
+	}
+
 
 	private clearKeywordCache(): void {
 		this.keywordCacheVersion += 1;
@@ -547,85 +793,21 @@ export class GuidebookKeywordHighlightController {
 		return style === "double" ? Math.max(3, normalizedWidth) : normalizedWidth;
 	}
 
-	private async resolveGuidebookFileKeywordIndex(
-		filePath: string,
-		mtime: number,
-		size: number,
-	): Promise<GuidebookFileKeywordCacheEntry> {
-		const cached = this.guidebookFileKeywordCacheByPath.get(filePath);
-		if (cached && cached.mtime === mtime && cached.size === size) {
-			return cached;
-		}
-		const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
-		if (!(file instanceof TFile)) {
-			return {
-				mtime,
-				size,
-				keywords: [],
-				keywordMatchGroups: [],
-				previewsByKeyword: new Map(),
-			};
-		}
-		const markdown = await this.plugin.app.vault.cachedRead(file);
-		const h1List = this.guidebookMarkdownParser.parseTree(markdown);
-		const settings = this.getSettings();
-		const keywordSet = new Set<string>();
-		const keywordMatchGroups: string[][] = [];
-		const groupedKeywordSet = new Set<string>();
-		const previewsByKeyword = new Map<string, GuidebookKeywordPreviewItem>();
-		for (const h1Node of h1List) {
-			for (const h2Node of h1Node.h2List) {
-				const keyword = h2Node.title.trim();
-				if (keyword.length > 0) {
-					const aliases = collectGuidebookAliases({
-						keyword,
-						content: h2Node.content,
-						enableWesternNameAutoAlias: settings.guidebookWesternNameAutoAliasEnabled,
-					});
-					const matchGroup = normalizeKeywordMatchGroup([keyword, ...aliases]);
-					const uniqueGroup: string[] = [];
-					for (const groupKeyword of matchGroup) {
-						keywordSet.add(groupKeyword);
-						if (!previewsByKeyword.has(groupKeyword)) {
-							previewsByKeyword.set(groupKeyword, {
-								keyword: groupKeyword,
-								title: h2Node.title,
-								categoryTitle: h1Node.title,
-								content: h2Node.content,
-								sourcePath: filePath,
-							});
-						}
-						if (groupedKeywordSet.has(groupKeyword)) {
-							continue;
-						}
-						groupedKeywordSet.add(groupKeyword);
-						uniqueGroup.push(groupKeyword);
-					}
-					if (uniqueGroup.length > 0) {
-						keywordMatchGroups.push(sortKeywordsByPriority(uniqueGroup));
-					}
-				}
-			}
-		}
-		for (const keyword of keywordSet) {
-			if (groupedKeywordSet.has(keyword)) {
-				continue;
-			}
-			groupedKeywordSet.add(keyword);
-			keywordMatchGroups.push([keyword]);
-		}
-		const keywords = sortKeywordsByPriority(Array.from(keywordSet));
-		const nextEntry: GuidebookFileKeywordCacheEntry = {
-			mtime,
-			size,
-			keywords,
-			keywordMatchGroups,
-			previewsByKeyword,
-		};
-		this.guidebookFileKeywordCacheByPath.set(filePath, nextEntry);
-		return nextEntry;
-	}
-
+	/**
+	 * 清理指南文件关键词缓存
+	 * 
+	 * 遍历当前缓存中的所有路径，仅保留与指定根目录相关且仍处于活动状态的指南文件。
+	 * 
+	 * @param guidebookRootPath - 指南库的根目录路径，用于限定清理范围
+	 * @param activeGuidebookPaths - 当前有效的指南文件路径集合（通常来自文件系统扫描或配置）
+	 * 
+	 * @remarks
+	 * 该方法会执行以下过滤逻辑：
+	 * 1. 跳过所有不在 `guidebookRootPath` 目录下的缓存条目（包括子目录）
+	 * 2. 对于在根目录下的条目，仅当路径存在于 `activeGuidebookPaths` 中时才保留，否则删除
+	 * 
+	 * 最终缓存中仅剩根目录下仍有效的指南文件关键词数据。
+	 */
 	private pruneGuidebookFileKeywordCache(guidebookRootPath: string, activeGuidebookPaths: Set<string>): void {
 		for (const path of this.guidebookFileKeywordCacheByPath.keys()) {
 			if (!this.novelLibraryService.isSameOrChildPath(path, guidebookRootPath)) {

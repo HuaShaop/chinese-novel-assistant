@@ -7,15 +7,6 @@ import {
 } from "./custom-type-config";
 
 export const DEFAULT_CHAPTER_NAME_FORMAT = "第{num}章 ";
-export const DEFAULT_CHAPTER_TEMPLATE =
-	`---
-vol_idx: ""
-ch_idx: "{num}"
-synopsis: ""
-tags: []
----
-
-`;
 
 export interface SettingDatas {
 	// 全局
@@ -35,6 +26,7 @@ export interface SettingDatas {
 	guidebookPreviewWidth: number;
 	guidebookPreviewMaxLines: number;
 	guidebookWesternNameAutoAliasEnabled: boolean;
+	guidebookPreviewReadingModeEnabled: boolean;
 
 	// 便签
 	stickyNoteEnabled: boolean;
@@ -88,8 +80,6 @@ export interface SettingDatas {
 	guidebookCollectionOrders: Record<string, string[]>;
 	guidebookTreeExpandedStates: Record<string, boolean>;
 	guidebookTreeAllExpanded: boolean;
-	// 新建章节模板
-	chapterTemplate: string;
 }
 
 export function createDefaultSettings(): SettingDatas {
@@ -109,6 +99,7 @@ export function createDefaultSettings(): SettingDatas {
 		guidebookPreviewWidth: 320,
 		guidebookPreviewMaxLines: 8,
 		guidebookWesternNameAutoAliasEnabled: false,
+		guidebookPreviewReadingModeEnabled: false, // 是否在阅读模式下启用悬浮预览
 		stickyNoteEnabled: true,
 		stickyNoteDefaultRows: 5,
 		stickyNoteTagHintTextEnabled: true,
@@ -153,8 +144,6 @@ export function createDefaultSettings(): SettingDatas {
 		guidebookCollectionOrders: {},
 		guidebookTreeExpandedStates: {},
 		guidebookTreeAllExpanded: true,
-
-		chapterTemplate: DEFAULT_CHAPTER_TEMPLATE,
 	};
 }
 

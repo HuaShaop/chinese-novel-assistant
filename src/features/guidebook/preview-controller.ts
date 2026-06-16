@@ -1,5 +1,5 @@
 import { EditorView } from "@codemirror/view";
-import { MarkdownView, TFile, type Plugin } from "obsidian";
+import { MarkdownView, TFile, WorkspaceLeaf, type Plugin } from "obsidian";
 import { type SettingDatas } from "../../core";
 import type { GuidebookKeywordPreviewItem } from "../text-detection/rules/guidebook-keyword";
 import { GuidebookPreviewPopover } from "./views/preview-popover";
@@ -310,8 +310,8 @@ export class GuidebookPreviewController {
 		let searchLeaf = workspace.getLeavesOfType("search")[0] ?? null;
 		if (!searchLeaf) {
 			const workspaceAny = workspace as unknown as {
-				getLeftLeaf?: (split: boolean) => typeof searchLeaf;
-				getRightLeaf?: (split: boolean) => typeof searchLeaf;
+				getLeftLeaf?: (split: boolean) => WorkspaceLeaf | null;
+				getRightLeaf?: (split: boolean) => WorkspaceLeaf | null;
 			};
 			searchLeaf = workspaceAny.getLeftLeaf?.(false) ?? workspaceAny.getRightLeaf?.(false) ?? null;
 			if (!searchLeaf) {
