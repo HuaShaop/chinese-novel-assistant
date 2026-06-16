@@ -307,14 +307,13 @@ class CharacterCountFeature {
 	}
 
 	private buildScope(settings: SettingDatas): CountScope {
-		const libraryRoots = this.novelLibraryService.normalizeLibraryRoots(settings.novelLibraries);
-
+		const normalizedBaseRoots = this.novelLibraryService.normalizeLibraryRoots(settings.novelLibraries);
+		const libraryRoots = normalizedBaseRoots.map((root) => `${root}/正文`);
 		const excludedRootsByLibrary = new Map<string, string[]>();
 		for (const libraryRoot of libraryRoots) {
 			const excludedRoots = this.novelLibraryService.resolveNovelLibrarySubdirPaths(libraryRoot);
 			excludedRootsByLibrary.set(libraryRoot, excludedRoots);
 		}
-
 		return {
 			limitToNovelLibraries: settings.countOnlyNovelLibrary,
 			libraryRoots,
