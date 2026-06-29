@@ -23,6 +23,7 @@ export const NOVEL_LIBRARY_SUBDIR_NAMES = {
 	proofreadDictionary: "纠错词库",
 	templeLibrary: "模板库",
 	changeRecord: "变动记录",
+	mapLibrary: "地图库"
 } as const;
 
 export const GUIDEBOOK_SUBDIR_NAMES = {

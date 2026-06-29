@@ -18,7 +18,7 @@ import { registerTypesetFeature } from "./features/typeset";
 import { registerNovelLibraryFeature } from "./features/novel-library";
 import { registerAnnotationFeature, registerAnnotationSidebarView } from "./features/annotation";
 import { registerTimelineSidebarView } from "./features/timeline";
-
+import { registerMapView } from "./features/map";
 import { logger } from "./utils/logger";
 
 export default class CNAPlugin extends Plugin {
@@ -40,6 +40,7 @@ export default class CNAPlugin extends Plugin {
 		registerTimelineSidebarView(this, this.ctx);
 		registerStickyNoteFloatingFeature(this, this.ctx);
 		registerSidebarFeature(this, this.ctx);
+		registerMapView(this, this.ctx);
 
 		// 注册功能
 		registerNovelLibraryFeature(this, this.ctx);
