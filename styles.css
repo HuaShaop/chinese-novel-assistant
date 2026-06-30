@@ -3118,6 +3118,13 @@ button.cna-sticky-note-card__image-remove:hover {
 	max-width: calc(100vw - 16px);
 }
 
+.map-library-label {
+	margin: 6px 0;
+	text-align: center;
+	font-size: 14px;
+	color: var(--text-muted);
+}
+
 .novel-map-toolbar {
 	display: flex;
 	align-items: center;
@@ -3160,12 +3167,6 @@ button.cna-sticky-note-card__image-remove:hover {
 .map-reset-btn:hover,
 .map-filter-btn:hover {
 	background: var(--interactive-hover);
-}
-
-.map-library-label {
-	margin-left: 12px;
-	font-size: 14px;
-	color: var(--text-muted);
 }
 
 .map-zoom-label {

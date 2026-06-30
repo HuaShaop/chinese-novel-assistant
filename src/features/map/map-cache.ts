@@ -1,6 +1,7 @@
 import { TFile, TFolder } from 'obsidian';
 import { NOVEL_LIBRARY_SUBDIR_NAMES, NovelLibraryService, PluginContext } from '../../core';
 import { logger } from '../../utils/logger';
+import { Marker } from './types';
 
 export class MapCache {
     private ctx: PluginContext;
@@ -11,6 +12,7 @@ export class MapCache {
     private imageFiles: TFile[] = [];
     private recentFilePath: string | null = null;
     private isInitialized: boolean = false;
+    private markersCache: Map<string, Marker[]> = new Map();
 
     // 当前选中的文件路径（用于恢复选中状态）
     private selectedPath: string = '';
@@ -52,6 +54,7 @@ export class MapCache {
             .sort((a, b) => a.name.localeCompare(b.name));
 
         this.isInitialized = true;
+        this.markersCache.clear();
     }
 
     /**
@@ -118,6 +121,52 @@ export class MapCache {
         return newPath !== this.mapLibPath;
     }
 
+    /**
+     * 加载指定图片的标记列表
+     * 约定标记文件路径为：图片路径 + '.markers.json'
+     */
+    async loadMarkers(imagePath: string): Promise<Marker[]> {
+        if (this.markersCache.has(imagePath)) {
+            return this.markersCache.get(imagePath) || [];
+        }
+        const markerFilePath = this.getMarkerFilePath(imagePath);
+        try {
+            const exists = await this.ctx.app.vault.adapter.exists(markerFilePath);
+            if (!exists) {
+                this.markersCache.set(imagePath, []);
+                return [];
+            }
+            const content = await this.ctx.app.vault.adapter.read(markerFilePath);
+            const data = JSON.parse(content);
+            const markers = Array.isArray(data) ? data : [];
+            this.markersCache.set(imagePath, markers);
+            return markers;
+        } catch (e) {
+            logger.warn(`读取标记文件失败: ${markerFilePath}`, e);
+            this.markersCache.set(imagePath, []);
+            return [];
+        }
+    }
+
+    /**
+     * 保存指定图片的标记列表
+     */
+    async saveMarkers(imagePath: string, markers: Marker[]): Promise<void> {
+        const markerFilePath = this.getMarkerFilePath(imagePath);
+        const content = JSON.stringify(markers, null, 2);
+        await this.ctx.app.vault.adapter.write(markerFilePath, content);
+        this.markersCache.set(imagePath, markers);
+    }
+
+    /**
+     * 清除标记缓存（通常在库路径切换时调用）
+     */
+    clearMarkersCache(): void {
+        this.markersCache.clear();
+    }
+
+    
+
     // ==================== 私有方法 ====================
     private resolveMapLibPath(): string | null {
         const { app, settings } = this.ctx;
@@ -136,5 +185,9 @@ export class MapCache {
             containingLibraryRoot,
             NOVEL_LIBRARY_SUBDIR_NAMES.mapLibrary
         );
+    }
+    
+    private getMarkerFilePath(imagePath: string): string {
+        return imagePath + '.markers.json';
     }
 }

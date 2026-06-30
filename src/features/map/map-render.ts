@@ -1,6 +1,6 @@
 import { TFile } from 'obsidian';
 import { PluginContext } from '../../core';
-
+import { Marker } from './types';
 export class MapRenderer {
     private canvas: HTMLCanvasElement | null = null;
     private ctx: CanvasRenderingContext2D | null = null;
@@ -8,6 +8,9 @@ export class MapRenderer {
     private scale: number = 1;
     private offsetX: number = 0;
     private offsetY: number = 0;
+    private markers: Marker[] = [];
+    private readonly max_scale: number = 3.0;
+    private readonly min_scale: number = 0.2;
 
     constructor(private readonly appContext: PluginContext) { }
 
@@ -17,18 +20,22 @@ export class MapRenderer {
         this.ctx = canvas.getContext('2d');
     }
 
+    setMarkers(markers: Marker[]): void {
+        this.markers = markers || [];
+        this.redraw();
+    }
+
+    getMarkers(): Marker[] {
+        return this.markers;
+    }
+
     /** 加载图片文件到 Canvas */
     loadImage(file: TFile): void {
         const url = this.appContext.app.vault.getResourcePath(file);
         const img = new Image();
         img.onload = () => {
             this.image = img;
-            this.scale = 1;
-            if (this.canvas) {
-                this.offsetX = (this.canvas.width - img.width) / 2;
-                this.offsetY = (this.canvas.height - img.height) / 2;
-            }
-            this.redraw();
+            this.applyFitToCanvas();
         };
         img.onerror = () => {
             // 由调用方处理错误通知
@@ -38,10 +45,10 @@ export class MapRenderer {
         img.src = url;
     }
 
-    /** 设置缩放比例（0.2 ~ 3.0） */
+    /** 设置缩放比例（this.min_scale ~ this.max_scale） */
     setScale(newScale: number): void {
         if (!this.canvas || !this.image) return;
-        const clamped = Math.min(3.0, Math.max(0.2, newScale));
+        const clamped = Math.min(this.max_scale, Math.max(this.min_scale, newScale));
         if (clamped === this.scale) return;
 
         // 围绕画布中心缩放
@@ -61,13 +68,23 @@ export class MapRenderer {
         return this.scale;
     }
 
+    private applyFitToCanvas(): void {
+        if (!this.canvas || !this.image) return;
+        const cw = this.canvas.width, ch = this.canvas.height;
+        let fitScale = Math.min(cw / this.image.width, ch / this.image.height);
+        fitScale = Math.min(3.0, Math.max(0.2, fitScale));
+        this.scale = fitScale;
+        this.offsetX = (cw - this.image.width * fitScale) / 2;
+        this.offsetY = (ch - this.image.height * fitScale) / 2;
+        this.redraw();
+    }
+
     /** 重绘画布 */
     redraw(): void {
         const canvas = this.canvas;
         const ctx = this.ctx;
         if (!canvas || !ctx) return;
 
-        // 调整画布大小以适应容器
         const container = canvas.parentElement;
         if (container) {
             const rect = container.getBoundingClientRect();
@@ -83,6 +100,31 @@ export class MapRenderer {
             ctx.scale(this.scale, this.scale);
             ctx.drawImage(this.image, 0, 0);
             ctx.restore();
+        }
+
+        if (this.image && this.markers.length > 0) {
+            const { offsetX, offsetY, scale } = this;
+            for (const marker of this.markers) {
+                const screenX = offsetX + marker.x * scale;
+                const screenY = offsetY + marker.y * scale;
+
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, 5, 0, Math.PI * 2);
+                ctx.fillStyle = marker.color || '#e74c3c';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                if (marker.label) {
+                    const fontSize = 14;
+                    ctx.font = `bold ${fontSize}px '楷体', 'KaiTi', serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillStyle = '#222222';
+                    ctx.fillText(marker.label, screenX, screenY - 10);
+                }
+            }
         }
     }
 
@@ -101,8 +143,8 @@ export class MapRenderer {
         const oldScale = this.scale;
         let newScale = oldScale * factor;
         // 限制缩放范围
-        if (newScale > 3.0) newScale = 3.0;
-        if (newScale < 0.2) newScale = 0.2;
+        if (newScale > this.max_scale) newScale = this.max_scale;
+        if (newScale < this.min_scale) newScale = this.min_scale;
         if (newScale === oldScale) return;
 
         // 计算鼠标位置在图片坐标系中的坐标（世界坐标）
@@ -119,18 +161,14 @@ export class MapRenderer {
     }
 
     resetTransform(): void {
-        if (!this.canvas || !this.image) return;
-        this.scale = 1;
-        // 重新居中图片
-        this.offsetX = (this.canvas.width - this.image.width) / 2;
-        this.offsetY = (this.canvas.height - this.image.height) / 2;
-        this.redraw();
+        this.applyFitToCanvas();
     }
+
     /** 获取当前加载的图片对象（用于外部检测） */
     hasImage(): boolean {
         return this.image !== null;
     }
-    
+
     getOffsetX(): number {
         return this.offsetX;
     }

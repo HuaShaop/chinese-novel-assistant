@@ -1,36 +1,42 @@
-import { ItemView, WorkspaceLeaf, Notice, TFile, TFolder } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice, TFile, TFolder, IconName, Menu } from 'obsidian';
 import { PluginContext } from '../../core';
 import { MapCache } from './map-cache';
 import { MapRenderer } from './map-render';
+import { Marker } from './types';
+import { MarkerModal } from './marker-modal';
+import { logger } from '../../utils/logger';
 
 export const MAP_VIEW_TYPE = 'novel-map-view';
 
 export class MapView extends ItemView {
-    // 核心模块
     private cache: MapCache;
     private renderer: MapRenderer;
 
-    // DOM 元素
     private selectEl: HTMLSelectElement | null = null;
     private sliderEl: HTMLInputElement | null = null;
     private canvasEl: HTMLCanvasElement | null = null;
     private libraryNameEl: HTMLElement | null = null;
     private zoomLabelEl: HTMLElement | null = null;
-    // 拖拽状态
-    private isDragging: boolean = false;
-    private dragStartX: number = 0;
-    private dragStartY: number = 0;
-    private dragStartOffsetX: number = 0;
-    private dragStartOffsetY: number = 0;
-    // 事件处理器引用（用于清理）
+
+    // 统一拖拽状态
+    private dragState = {
+        isDragging: false,
+        startX: 0,
+        startY: 0,
+        offsetX: 0,
+        offsetY: 0
+    };
+
+    // 使用 AbortController 管理 DOM 事件
+    private domController: AbortController | null = null;
+    private globalDragController: AbortController | null = null;
+
     private vaultHandler: ((file: TFile | TFolder) => void) | null = null;
     private workspaceHandler: ((leaf: WorkspaceLeaf | null) => void) | null = null;
-    private boundWheelHandler: ((e: WheelEvent) => void) | null = null;
-    private boundOnMouseDown: ((e: MouseEvent) => void) | null = null;
-    private boundOnMouseMove: ((e: MouseEvent) => void) | null = null;
-    private boundOnMouseUp: ((e: MouseEvent) => void) | null = null;
-    // 刷新锁
-    private refreshPromise: Promise<void> | null = null;
+    private layoutHandler: (() => void) | null = null;
+
+    private refreshPromise: Promise<unknown> | null = null;
+    private rootName: string;
 
     constructor(leaf: WorkspaceLeaf, private readonly ctx: PluginContext) {
         super(leaf);
@@ -46,94 +52,41 @@ export class MapView extends ItemView {
         return '小说地图';
     }
 
+    getIcon(): IconName {
+        return 'map';
+    }
+
     async onOpen() {
         const container = this.containerEl;
         container.empty();
 
-        // 创建工具栏
+        this.buildLibraryLabel(container);
+
         const toolbar = container.createDiv({ cls: 'novel-map-toolbar' });
         this.buildToolbar(toolbar);
 
-        // 创建画布容器
         const canvasContainer = container.createDiv({ cls: 'novel-map-canvas-container' });
         this.canvasEl = canvasContainer.createEl('canvas');
         this.renderer.setCanvas(this.canvasEl);
-        this.boundWheelHandler = (e: WheelEvent) => {
-            e.preventDefault(); // 阻止页面滚动
-            const rect = this.canvasEl!.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            // 滚轮向下（deltaY > 0）缩小，向上放大
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            this.renderer.zoomAt(mouseX, mouseY, delta);
+        this.setupCanvasEvents();
 
-            // 同步缩放滑块
-            const newScale = this.renderer.getScale();
-            if (this.sliderEl) {
-                this.sliderEl.value = String(Math.round(newScale * 100));
-            }
-            this.updateZoomLabel(newScale);
-        };
-        this.canvasEl.addEventListener('wheel', this.boundWheelHandler);
-
-        // 鼠标按下事件
-        this.boundOnMouseDown = (e: MouseEvent) => {
-            // 只响应左键
-            if (e.button !== 0) return;
-            // 没有图片时不处理
-            if (!this.renderer.hasImage()) return;
-
-            const rect = this.canvasEl!.getBoundingClientRect();
-            // 检查鼠标是否在画布区域内
-            if (e.clientX < rect.left || e.clientX > rect.right ||
-                e.clientY < rect.top || e.clientY > rect.bottom) {
-                return;
-            }
-
-            this.isDragging = true;
-            this.dragStartX = e.clientX;
-            this.dragStartY = e.clientY;
-            this.dragStartOffsetX = this.renderer.getOffsetX();
-            this.dragStartOffsetY = this.renderer.getOffsetY();
-
-            this.canvasEl!.style.cursor = 'grabbing';
-            e.preventDefault();
-
-            // 在全局监听鼠标移动和释放
-            document.addEventListener('mousemove', this.boundOnMouseMove!);
-            document.addEventListener('mouseup', this.boundOnMouseUp!);
-        };
-        this.canvasEl.addEventListener('mousedown', this.boundOnMouseDown);
-
-        // 鼠标移动事件
-        this.boundOnMouseMove = (e: MouseEvent) => {
-            if (!this.isDragging) return;
-            const dx = e.clientX - this.dragStartX;
-            const dy = e.clientY - this.dragStartY;
-            this.renderer.setOffset(
-                this.dragStartOffsetX + dx,
-                this.dragStartOffsetY + dy
-            );
-        };
-
-        // 鼠标释放事件
-        this.boundOnMouseUp = (e: MouseEvent) => {
-            if (!this.isDragging) return;
-            this.isDragging = false;
-            this.canvasEl!.style.cursor = 'grab';
-            document.removeEventListener('mousemove', this.boundOnMouseMove!);
-            document.removeEventListener('mouseup', this.boundOnMouseUp!);
-        };
-
-        // 初始化缓存
         await this.initCache();
-        // 注册事件
         this.registerVaultEvents();
         this.registerWorkspaceEvents();
     }
 
     async onClose() {
-        // 移除事件监听
+        // 取消所有 DOM 事件
+        if (this.domController) {
+            this.domController.abort();
+            this.domController = null;
+        }
+        if (this.globalDragController) {
+            this.globalDragController.abort();
+            this.globalDragController = null;
+        }
+
+        // 清理 Obsidian 事件
         if (this.vaultHandler) {
             const vault = this.ctx.app.vault;
             vault.off('create', this.vaultHandler);
@@ -145,33 +98,25 @@ export class MapView extends ItemView {
             this.ctx.app.workspace.off('active-leaf-change', this.workspaceHandler);
             this.workspaceHandler = null;
         }
-        // 清理渲染器
-        this.renderer.clear();
-        if (this.boundWheelHandler && this.canvasEl) {
-            this.canvasEl.removeEventListener('wheel', this.boundWheelHandler);
-            this.boundWheelHandler = null;
-        }
-        // 移除 mousedown 监听
-        if (this.boundOnMouseDown && this.canvasEl) {
-            this.canvasEl.removeEventListener('mousedown', this.boundOnMouseDown);
-            this.boundOnMouseDown = null;
+        if (this.layoutHandler) {
+            this.ctx.app.workspace.off('layout-change', this.layoutHandler);
+            this.layoutHandler = null;
         }
 
-        // 清理可能残留的全局监听
-        if (this.boundOnMouseMove) {
-            document.removeEventListener('mousemove', this.boundOnMouseMove);
-            this.boundOnMouseMove = null;
-        }
-        if (this.boundOnMouseUp) {
-            document.removeEventListener('mouseup', this.boundOnMouseUp);
-            this.boundOnMouseUp = null;
-        }
-        this.isDragging = false;
+        // 取消可能正在进行的刷新
+        this.refreshPromise = null;
+        this.renderer.clear();
+        this.dragState.isDragging = false;
     }
 
     // ==================== UI 构建 ====================
     private buildToolbar(container: HTMLElement) {
-        // 下拉菜单
+        this.buildSelect(container);
+        this.buildZoomControls(container);
+        this.buildActionButtons(container);
+    }
+
+    private buildSelect(container: HTMLElement) {
         const select = container.createEl('select', { cls: 'map-select' });
         select.style.width = '200px';
         this.selectEl = select;
@@ -181,22 +126,28 @@ export class MapView extends ItemView {
             this.cache.setSelectedPath(val);
             this.loadImageByPath(val);
         });
+    }
 
-        // 缩小按钮
-        const zoomOutBtn = container.createEl('button', { text: '−', cls: 'map-zoom-btn' });
-        zoomOutBtn.addEventListener('click', () => {
-            if (this.sliderEl) {
-                let newVal = parseInt(this.sliderEl.value) - 5;
-                if (newVal < 20) newVal = 20;
+    private buildZoomControls(container: HTMLElement) {
+        // 工厂函数创建按钮
+        const createZoomButton = (text: string, delta: number) => {
+            const btn = container.createEl('button', { text, cls: 'map-zoom-btn' });
+            btn.addEventListener('click', () => {
+                if (!this.sliderEl) return;
+                let newVal = parseInt(this.sliderEl.value) + delta;
+                newVal = Math.max(20, Math.min(300, newVal));
                 this.sliderEl.value = String(newVal);
-                this.sliderEl.dispatchEvent(new Event('input'));
-            }
-        });
-        //百分比标签
+                this.applyScale(parseInt(this.sliderEl.value) / 100);
+            });
+            return btn;
+        };
+
+        createZoomButton('−', -5);
+
         const zoomLabel = container.createEl('span', { cls: 'map-zoom-label' });
         zoomLabel.textContent = '100%';
         this.zoomLabelEl = zoomLabel;
-        // 缩放滑块
+
         const slider = container.createEl('input', {
             type: 'range',
             cls: 'map-zoom-slider',
@@ -204,68 +155,53 @@ export class MapView extends ItemView {
         });
         this.sliderEl = slider;
         slider.addEventListener('input', () => {
-            const scale = parseInt(slider.value) / 100;
-            this.renderer.setScale(scale);
-            this.updateZoomLabel(scale);
+            this.applyScale(parseInt(slider.value) / 100);
         });
 
-        // 放大按钮
-        const zoomInBtn = container.createEl('button', { text: '+', cls: 'map-zoom-btn' });
-        zoomInBtn.addEventListener('click', () => {
-            if (this.sliderEl) {
-                let newVal = parseInt(this.sliderEl.value) + 5;
-                if (newVal > 300) newVal = 300;
-                this.sliderEl.value = String(newVal);
-                this.sliderEl.dispatchEvent(new Event('input'));
-            }
-        });
+        createZoomButton('+', 5);
+    }
 
-        // 重置按钮
-        const resetBtn = container.createEl('button', { text: '⟲', cls: 'map-reset-btn' });
-        resetBtn.addEventListener('click', () => {
+    private buildActionButtons(container: HTMLElement) {
+        const createActionButton = (text: string, cls: string, onClick: () => void) => {
+            const btn = container.createEl('button', { text, cls });
+            btn.addEventListener('click', onClick);
+            return btn;
+        };
+
+        createActionButton('⟲', 'map-reset-btn', () => {
             this.renderer.resetTransform();
+            const currentScale = this.renderer.getScale();
             if (this.sliderEl) {
-                this.sliderEl.value = '100';
+                this.sliderEl.value = String(Math.round(currentScale * 100));
             }
-            this.updateZoomLabel(1);
+            this.updateZoomLabel(currentScale);
         });
 
-        // 筛选按钮（占位）
-        const filterBtn = container.createEl('button', { text: '🔍', cls: 'map-filter-btn' });
-        filterBtn.addEventListener('click', () => {
+        createActionButton('🔍', 'map-filter-btn', () => {
             new Notice('筛选功能暂未实现');
         });
 
-        // 手动刷新按钮
-        const refreshBtn = container.createEl('button', { text: '↻', cls: 'map-refresh-btn' });
-        refreshBtn.addEventListener('click', async () => {
+        createActionButton('↻', 'map-refresh-btn', async () => {
             await this.initCache(true);
             new Notice('地图列表已刷新');
         });
+    }
 
-        const libraryLabel = container.createEl('span', { cls: 'map-library-label' });
-        libraryLabel.textContent = '库: 未激活'; // 占位
+    private buildLibraryLabel(container: HTMLElement) {
+        const libraryLabel = container.createEl('div', { cls: 'map-library-label' });
+        libraryLabel.textContent = '未激活小说库';
         this.libraryNameEl = libraryLabel;
     }
 
     // ==================== 缓存与 UI 同步 ====================
     private async initCache(force: boolean = false) {
-        if (this.refreshPromise) {
-            return this.refreshPromise;
-        }
-        this.refreshPromise = this.doInitCache(force);
-        try {
-            await this.refreshPromise;
-        } finally {
-            this.refreshPromise = null;
-        }
+        await this.withRefreshLock(() => this.doInitCache(force));
         this.updateLibraryInfo();
     }
 
     private async doInitCache(force: boolean) {
         await this.cache.init(force);
         if (!this.cache.getMapLibPath()) {
-            // 无法定位地图库，显示通用提示
             this.renderer.showEmptyState('未找到地图库，请确保当前笔记位于小说库中');
         }
         this.updateDropdown();
@@ -273,14 +209,8 @@ export class MapView extends ItemView {
 
     private async refreshCache() {
         if (!this.cache.getMapLibPath()) return;
-        if (this.refreshPromise) {
-            await this.refreshPromise;
-            return;
-        }
-        const changed = await this.cache.refresh();
-        if (changed) {
-            this.updateDropdown();
-        }
+        const changed = await this.withRefreshLock(() => this.cache.refresh());
+        if (changed) this.updateDropdown();
     }
 
     private updateDropdown() {
@@ -307,7 +237,6 @@ export class MapView extends ItemView {
             select.appendChild(option);
         });
 
-        // 恢复选中状态
         let valueToSet = this.cache.getSelectedPath();
         if (!valueToSet || !files.some(f => f.path === valueToSet)) {
             valueToSet = files[0]!.path;
@@ -323,37 +252,276 @@ export class MapView extends ItemView {
         if (!this.libraryNameEl) return;
         const mapLibPath = this.cache.getMapLibPath();
         if (!mapLibPath) {
-            this.libraryNameEl.textContent = '库: 未激活';
+            this.libraryNameEl.textContent = '未激活小说库';
             return;
         }
-        // 假设 mapLibPath 格式为 "库根目录/_功能库"，我们取第一级目录名
         const parts = mapLibPath.split('/');
-        if (parts.length >= 1) {
-            const rootName = parts[0]; // 或使用 NovelLibraryService 获取更友好的名称
-            this.libraryNameEl.textContent = `库: ${rootName}`;
-        } else {
-            this.libraryNameEl.textContent = `库: ${mapLibPath}`;
-        }
+        this.rootName = parts.length >= 1 ? parts[0]! : mapLibPath;
+        this.libraryNameEl.textContent = `${this.rootName}`;
     }
 
     private updateZoomLabel(scale: number) {
         if (!this.zoomLabelEl) return;
-        const percent = Math.round(scale * 100);
-        this.zoomLabelEl.textContent = `${percent}%`;
+        this.zoomLabelEl.textContent = `${Math.round(scale * 100)}%`;
     }
+
     // ==================== 图片加载 ====================
-    private loadImageByPath(path: string) {
+    private async loadImageByPath(path: string) {
         const file = this.ctx.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) {
             new Notice('文件不存在');
             return;
         }
-
-        if (this.sliderEl) {
-            this.sliderEl.value = '100';
-        }
-        this.updateZoomLabel(1);
+        const markers = await this.cache.loadMarkers(path);
+        this.renderer.setMarkers(markers);
         this.renderer.loadImage(file);
+        this.updateZoomLabel(this.renderer.getScale());
+        if (this.sliderEl) {
+            this.sliderEl.value = String(Math.round(this.renderer.getScale() * 100));
+        }
+    }
+
+    // ==================== 交互处理 ====================
+    private screenToImageCoords(mouseX: number, mouseY: number): { x: number; y: number } {
+        const offsetX = this.renderer.getOffsetX();
+        const offsetY = this.renderer.getOffsetY();
+        const scale = this.renderer.getScale();
+        return { x: (mouseX - offsetX) / scale, y: (mouseY - offsetY) / scale };
+    }
+
+    private applyScale(scale: number) {
+        this.renderer.setScale(scale);
+        if (this.sliderEl) {
+            this.sliderEl.value = String(Math.round(scale * 100));
+        }
+        this.updateZoomLabel(scale);
+    }
+
+    private findMarkerAtScreenPos(mouseX: number, mouseY: number): { marker: Marker; index: number } | null {
+        if (!this.renderer.hasImage()) return null;
+        const offsetX = this.renderer.getOffsetX();
+        const offsetY = this.renderer.getOffsetY();
+        const scale = this.renderer.getScale();
+        const markers = this.renderer.getMarkers();
+
+        for (let i = 0; i < markers.length; i++) {
+            const m = markers[i];
+            if (!m) continue;
+            const screenX = offsetX + m.x * scale;
+            const screenY = offsetY + m.y * scale;
+            const dx = mouseX - screenX;
+            const dy = mouseY - screenY;
+            if (dx * dx + dy * dy < 100) {
+                return { marker: m, index: i };
+            }
+        }
+        return null;
+    }
+
+    private handleContextMenu(clientX: number, clientY: number) {
+        const rect = this.canvasEl?.getBoundingClientRect();
+        if (!rect) return;
+        const mouseX = clientX - rect.left;
+        const mouseY = clientY - rect.top;
+        const hit = this.findMarkerAtScreenPos(mouseX, mouseY);
+        const currentPath = this.cache.getSelectedPath();
+        if (!currentPath) return;
+
+        const menu = new Menu();
+        if (hit) {
+            menu.addItem(item => item
+                .setTitle('编辑标记')
+                .setIcon('pencil')
+                .onClick(() => this.editMarker(hit.index, hit.marker, currentPath))
+            );
+            menu.addItem(item => item
+                .setTitle('删除标记')
+                .setIcon('trash')
+                .onClick(() => this.deleteMarker(hit.index, currentPath))
+            );
+        } else {
+            menu.addItem(item => item
+                .setTitle('添加标记')
+                .setIcon('plus')
+                .onClick(() => this.createMarker(mouseX, mouseY, currentPath))
+            );
+        }
+        menu.showAtPosition({ x: clientX, y: clientY });
+    }
+
+    private handleMarkerClick(mouseX: number, mouseY: number) {
+        const hit = this.findMarkerAtScreenPos(mouseX, mouseY);
+        if (hit && hit.marker.link) {
+            this.ctx.app.workspace.openLinkText(hit.marker.link, this.cache.getMapLibPath() || '');
+        }
+    }
+
+    private async createMarker(mouseX: number, mouseY: number, imagePath: string) {
+        const { x: imgX, y: imgY } = this.screenToImageCoords(mouseX, mouseY);
+        const modal = new MarkerModal(this.ctx.app, this.rootName, '添加标记');
+        modal.open();
+        const result = await modal.waitForResult();
+        if (!result) return;
+
+        const markers = this.renderer.getMarkers();
+        const newMarker: Marker = {
+            id: Date.now().toString(),
+            x: imgX,
+            y: imgY,
+            label: result.label,
+            link: result.link,
+            color: result.color
+        };
+        markers.push(newMarker);
+        await this.cache.saveMarkers(imagePath, markers);
+        this.renderer.setMarkers(markers);
+    }
+
+    private async editMarker(index: number, marker: Marker, imagePath: string) {
+        const modal = new MarkerModal(
+            this.ctx.app,
+            this.rootName,
+            '编辑标记',
+            marker.label || '',
+            marker.link || '',
+            marker.color || '#e74c3c'
+        );
+        modal.open();
+        const result = await modal.waitForResult();
+        if (!result) return;
+
+        const markers = this.renderer.getMarkers();
+        markers[index] = {
+            ...marker,
+            label: result.label,
+            link: result.link || undefined,
+            color: result.color
+        };
+        await this.cache.saveMarkers(imagePath, markers);
+        this.renderer.setMarkers(markers);
+    }
+
+    private async deleteMarker(index: number, imagePath: string) {
+        const markers = this.renderer.getMarkers();
+        markers.splice(index, 1);
+        await this.cache.saveMarkers(imagePath, markers);
+        this.renderer.setMarkers(markers);
+    }
+
+    // ==================== Canvas 事件拆分 ====================
+    private setupCanvasEvents() {
+        if (!this.canvasEl) return;
+
+        // 创建控制器用于 canvas 自身事件
+        this.domController = new AbortController();
+        const signal = this.domController.signal;
+
+        this.setupWheel(signal);
+        this.setupDrag(signal);
+        this.setupContextMenu(signal);
+        this.setupClick(signal);
+        this.setupResize(signal);
+    }
+
+    private setupWheel(signal: AbortSignal) {
+        if (!this.canvasEl) return;
+        this.canvasEl.addEventListener('wheel', (e: WheelEvent) => {
+            e.preventDefault();
+            const rect = this.canvasEl!.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            this.renderer.zoomAt(mouseX, mouseY, delta);
+            this.applyScale(this.renderer.getScale());
+        }, { signal, passive: false });
+    }
+
+    private setupDrag(signal: AbortSignal) {
+        if (!this.canvasEl) return;
+
+        // 本地 mousedown
+        this.canvasEl.addEventListener('mousedown', (e: MouseEvent) => {
+            if (e.button !== 0 || !this.renderer.hasImage()) return;
+            const rect = this.canvasEl!.getBoundingClientRect();
+            if (e.clientX < rect.left || e.clientX > rect.right ||
+                e.clientY < rect.top || e.clientY > rect.bottom) return;
+
+            this.dragState.isDragging = true;
+            this.dragState.startX = e.clientX;
+            this.dragState.startY = e.clientY;
+            this.dragState.offsetX = this.renderer.getOffsetX();
+            this.dragState.offsetY = this.renderer.getOffsetY();
+            e.preventDefault();
+
+            // 创建全局拖拽控制器（每次拖拽重新创建，确保只有一个）
+            if (this.globalDragController) {
+                this.globalDragController.abort();
+            }
+            this.globalDragController = new AbortController();
+            const globalSignal = this.globalDragController.signal;
+
+            // 全局 mousemove
+            document.addEventListener('mousemove', (moveEv: MouseEvent) => {
+                if (!this.dragState.isDragging) return;
+                const dx = moveEv.clientX - this.dragState.startX;
+                const dy = moveEv.clientY - this.dragState.startY;
+                this.renderer.setOffset(
+                    this.dragState.offsetX + dx,
+                    this.dragState.offsetY + dy
+                );
+            }, { signal: globalSignal });
+
+            // 全局 mouseup
+            document.addEventListener('mouseup', () => {
+                if (!this.dragState.isDragging) return;
+                this.dragState.isDragging = false;
+                // 清理全局控制器
+                if (this.globalDragController) {
+                    this.globalDragController.abort();
+                    this.globalDragController = null;
+                }
+            }, { signal: globalSignal, once: true });
+        }, { signal });
+    }
+
+    private setupContextMenu(signal: AbortSignal) {
+        if (!this.canvasEl) return;
+        this.canvasEl.addEventListener('contextmenu', (e: MouseEvent) => {
+            e.preventDefault();
+            this.handleContextMenu(e.clientX, e.clientY);
+        }, { signal });
+    }
+
+    private setupClick(signal: AbortSignal) {
+        if (!this.canvasEl) return;
+        this.canvasEl.addEventListener('click', (e: MouseEvent) => {
+            if (this.dragState.isDragging) return;
+            const rect = this.canvasEl!.getBoundingClientRect();
+            this.handleMarkerClick(e.clientX - rect.left, e.clientY - rect.top);
+        }, { signal });
+    }
+
+    private setupResize(signal: AbortSignal) {
+        window.addEventListener('resize', () => {
+            requestAnimationFrame(() => this.renderer.redraw());
+        }, { signal });
+    }
+
+    // ==================== 异步锁 ====================
+    private async withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+        if (this.refreshPromise) {
+            // 等待当前锁完成，并返回其结果（不重新执行）
+            return this.refreshPromise as Promise<T>;
+        }
+        const promise = fn();
+        this.refreshPromise = promise;
+        try {
+            return await promise;
+        } finally {
+            if (this.refreshPromise === promise) {
+                this.refreshPromise = null;
+            }
+        }
     }
 
     // ==================== 事件注册 ====================
@@ -372,14 +540,21 @@ export class MapView extends ItemView {
 
     private registerWorkspaceEvents() {
         const handler = (leaf: WorkspaceLeaf | null) => {
-            if (leaf?.view === this) {
-                // 检测小说库是否变化
-                if (this.cache.checkLibraryChanged()) {
-                    this.initCache(true); // 强制刷新
-                }
+            if (leaf?.view === this && this.cache.checkLibraryChanged()) {
+                this.initCache(true);
             }
         };
         this.workspaceHandler = handler;
         this.ctx.app.workspace.on('active-leaf-change', handler);
+
+        const layoutHandler = () => {
+            if (this.canvasEl) {
+                requestAnimationFrame(() => {
+                    this.renderer.redraw();
+                });
+            }
+        };
+        this.layoutHandler = layoutHandler;
+        this.ctx.app.workspace.on('layout-change', layoutHandler);
     }
 }
