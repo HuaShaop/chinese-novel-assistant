@@ -1,7 +1,6 @@
 import type { TranslationKey } from "../lang";
 import { isRecord, parseColorHex } from "../utils";
 import { STICKY_NOTE_COLORS } from "./constants";
-import { logger } from "../utils/logger";
 
 export type CustomTypeKey =
 	| "summary"
@@ -63,6 +62,25 @@ export const DEFAULT_TIMELINE_CUSTOM_TYPES: readonly CustomTypeSettingItem[] = T
 	label: "",
 	colorHex: DEFAULT_COLORS[index] ?? "#9CA3AF",
 }));
+
+export interface MapMarkerType {
+	key: string;
+	type: string;
+	color: string;
+	markerSize: number;
+	fontSize: number;
+	fontFamily: string;
+}
+
+export const DEFAULT_MAP_MARKER_TYPES: readonly MapMarkerType[] = [
+	{ key: 'city', type: '城市', color: '#4A90D9', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+	{ key: 'town', type: '城镇', color: '#50B7A0', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+	{ key: 'village', type: '村庄', color: '#8E44AD', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+	{ key: 'landmark', type: '地标', color: '#E67E22', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+	{ key: 'ruin', type: '遗迹', color: '#95A5A6', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+	{ key: 'dungeon', type: '秘境', color: '#9B59B6', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+	{ key: 'custom', type: '自定义', color: '#111111', markerSize: 12, fontSize: 13, fontFamily: 'sans-serif' },
+];
 
 export function resolveStickyNoteCustomColors(rawValue: unknown): string[] {
 	const raw: unknown[] = Array.isArray(rawValue) ? rawValue : [];
@@ -208,16 +226,16 @@ function resolveCustomTypes(rawValue: unknown, defaults: readonly CustomTypeSett
 
 	for (const [key, rawItem] of rawByKey.entries()) {
 		if (defaultKeySet.has(key)) continue;
-		if(!isRecord(rawItem)) continue;
+		if (!isRecord(rawItem)) continue;
 		const label = rawItem && typeof rawItem["label"] === "string"
 			? rawItem["label"].trim()
 			: key;
 		const colorHex = normalizeColorHex(rawItem["colorHex"]) ?? "#9CA3AF";
-        resolved.push({
-            key,
-            label,
-            colorHex,
-        });
+		resolved.push({
+			key,
+			label,
+			colorHex,
+		});
 	}
 	return resolved;
 }
@@ -236,7 +254,7 @@ function parseCustomTypeKey(value: unknown): CustomTypeKey | null {
 
 export function isDefaultTypeKey(
 	key: CustomTypeKey,
-	type: "annotation"|"timeline"
+	type: "annotation" | "timeline"
 ): boolean {
 	const defaults = type === "annotation"
 		? DEFAULT_ANNOTATION_CUSTOM_TYPES
@@ -245,28 +263,28 @@ export function isDefaultTypeKey(
 }
 
 function createCustomTypeKey(): string {
-    return `custom_${Date.now()}`;
+	return `custom_${Date.now()}`;
 }
 
 export function addCustomType(
-    current: unknown,
-    resolver: (rawValue: unknown) => CustomTypeSettingItem[],
+	current: unknown,
+	resolver: (rawValue: unknown) => CustomTypeSettingItem[],
 ): CustomTypeSettingItem[] {
-    const next = resolver(current);
-    let newColor = "#9CA3AF";
+	const next = resolver(current);
+	let newColor = "#9CA3AF";
 	next.push({
-		key: createCustomTypeKey(), 
+		key: createCustomTypeKey(),
 		label: "",
 		colorHex: newColor,
 	});
-    return next;
+	return next;
 }
 
 export function deleteCustomType(
-    current: unknown,
-    keyToDelete: string,
-    resolver: (rawValue: unknown) => CustomTypeSettingItem[],
+	current: unknown,
+	keyToDelete: string,
+	resolver: (rawValue: unknown) => CustomTypeSettingItem[],
 ): CustomTypeSettingItem[] {
-    const next = resolver(current);
-    return next.filter((item) => item.key !== keyToDelete);
+	const next = resolver(current);
+	return next.filter((item) => item.key !== keyToDelete);
 }

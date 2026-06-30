@@ -12,6 +12,7 @@ import {
 	renderProofreadSettings,
 	renderSnippetSettings,
 	renderTypesetSettings,
+	renderMapSettings
 } from "./index";
 
 const SETTINGS_SEARCH_HIDDEN_CLASS = "cna-settings-search-hidden";
@@ -122,10 +123,16 @@ export class CNASettingTab extends PluginSettingTab {
 				render: (panelEl) => renderTypesetSettings(panelEl, renderContext),
 			},
 			{
+				id: "map",
+				label: "地图",
+				render: (panelEl) => renderMapSettings(panelEl, renderContext),
+			},
+			{
 				id: "other",
 				label: this.ctx.t("settings.tab.other"),
 				render: (panelEl) => renderOtherSettings(panelEl, renderContext),
 			},
+
 		];
 	}
 

@@ -8,3 +8,4 @@ export { renderOtherSettings } from "./other-tab";
 export { renderProofreadSettings } from "./proofread-tab";
 export { renderSnippetSettings } from "./snippet-tab";
 export { renderTypesetSettings } from "./typeset-tab";
+export { renderMapSettings } from "./map-tab";

@@ -1,9 +1,11 @@
 import type { SupportedLocale } from "../lang";
 import {
 	type CustomTypeSettingItem,
+	type MapMarkerType,
 	DEFAULT_ANNOTATION_CUSTOM_TYPES,
 	DEFAULT_STICKY_NOTE_CUSTOM_COLORS,
 	DEFAULT_TIMELINE_CUSTOM_TYPES,
+	DEFAULT_MAP_MARKER_TYPES
 } from "./custom-type-config";
 
 export const DEFAULT_CHAPTER_NAME_FORMAT = "第{num}章 ";
@@ -76,10 +78,14 @@ export interface SettingDatas {
 	enableCharacterMilestone: boolean;
 	countOnlyNovelLibrary: boolean;
 
+	//地图
+	markerTypes: MapMarkerType[];
+
 	// 设定视图节点排序、展开与折叠数据
 	guidebookCollectionOrders: Record<string, string[]>;
 	guidebookTreeExpandedStates: Record<string, boolean>;
 	guidebookTreeAllExpanded: boolean;
+
 }
 
 export function createDefaultSettings(): SettingDatas {
@@ -106,9 +112,9 @@ export function createDefaultSettings(): SettingDatas {
 		stickyNoteCustomColors: [...DEFAULT_STICKY_NOTE_CUSTOM_COLORS],
 		annotationEnabled: false,
 		annotationAutoLocateOnFileSwitch: true,
-		annotationCustomTypes: DEFAULT_ANNOTATION_CUSTOM_TYPES.map((item) => ({ ...item })),
+		annotationCustomTypes: [...DEFAULT_ANNOTATION_CUSTOM_TYPES],
 		timelineEnabled: false,
-		timelineCustomTypes: DEFAULT_TIMELINE_CUSTOM_TYPES.map((item) => ({ ...item })),
+		timelineCustomTypes: [...DEFAULT_TIMELINE_CUSTOM_TYPES],
 
 		proofreadCommonPunctuationEnabled: false,
 		proofreadEnglishCommaEnabled: true,
@@ -141,6 +147,7 @@ export function createDefaultSettings(): SettingDatas {
 		enableCharacterMilestone: true,
 		countOnlyNovelLibrary: true,
 
+		markerTypes: [...DEFAULT_MAP_MARKER_TYPES],
 		guidebookCollectionOrders: {},
 		guidebookTreeExpandedStates: {},
 		guidebookTreeAllExpanded: true,

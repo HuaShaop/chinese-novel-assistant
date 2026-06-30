@@ -185,6 +185,11 @@ export class MapView extends ItemView {
             await this.initCache(true);
             new Notice('地图列表已刷新');
         });
+
+        //todo:筛选功能,隐藏marker功能
+        createActionButton('👁️', 'map-marker-show-btn', () => {
+            new Notice('隐藏marker功能暂未实现');
+        })
     }
 
     private buildLibraryLabel(container: HTMLElement) {
@@ -358,7 +363,7 @@ export class MapView extends ItemView {
 
     private async createMarker(mouseX: number, mouseY: number, imagePath: string) {
         const { x: imgX, y: imgY } = this.screenToImageCoords(mouseX, mouseY);
-        const modal = new MarkerModal(this.ctx.app, this.rootName, '添加标记');
+        const modal = new MarkerModal(this.ctx, this.rootName, '添加标记');
         modal.open();
         const result = await modal.waitForResult();
         if (!result) return;
@@ -368,9 +373,7 @@ export class MapView extends ItemView {
             id: Date.now().toString(),
             x: imgX,
             y: imgY,
-            label: result.label,
-            link: result.link,
-            color: result.color
+            ...result
         };
         markers.push(newMarker);
         await this.cache.saveMarkers(imagePath, markers);
@@ -379,12 +382,10 @@ export class MapView extends ItemView {
 
     private async editMarker(index: number, marker: Marker, imagePath: string) {
         const modal = new MarkerModal(
-            this.ctx.app,
+            this.ctx,
             this.rootName,
             '编辑标记',
-            marker.label || '',
-            marker.link || '',
-            marker.color || '#e74c3c'
+            marker
         );
         modal.open();
         const result = await modal.waitForResult();
@@ -392,10 +393,10 @@ export class MapView extends ItemView {
 
         const markers = this.renderer.getMarkers();
         markers[index] = {
-            ...marker,
-            label: result.label,
-            link: result.link || undefined,
-            color: result.color
+            ...result,
+            id: marker.id,
+            x: marker.x,
+            y: marker.y
         };
         await this.cache.saveMarkers(imagePath, markers);
         this.renderer.setMarkers(markers);

@@ -3177,3 +3177,36 @@ button.cna-sticky-note-card__image-remove:hover {
 	color: var(--text-muted);
 	user-select: none;
 }
+
+/* 预览容器：固定尺寸，居中内部元素 */
+.marker-preview-container {
+	width: 80px;
+	height: 80px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	/* 防止被压缩 */
+	padding: 0;
+	/* 内边距由固定尺寸控制 */
+	margin: 0 auto;
+	/* 在设置行内居中（可选） */
+}
+
+/* 预览圆形标记：动态尺寸由JS控制，文字强制单行 */
+.marker-preview-circle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	color: #fff;
+	text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+	transition: all 0.1s ease;
+	flex-shrink: 0;
+	white-space: nowrap;
+	/* 文字强制横向，不换行 */
+	text-overflow: clip;
+	/* 或者 ellipsis，但默认不截断 */
+	overflow: visible;
+	/* 确保文字不会因容器被裁剪 */
+}

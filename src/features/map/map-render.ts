@@ -109,20 +109,20 @@ export class MapRenderer {
                 const screenY = offsetY + marker.y * scale;
 
                 ctx.beginPath();
-                ctx.arc(screenX, screenY, 5, 0, Math.PI * 2);
-                ctx.fillStyle = marker.color || '#e74c3c';
+                ctx.arc(screenX, screenY, marker.markerSize, 0, Math.PI * 2);
+                ctx.fillStyle = marker.color || '#ffffff';
                 ctx.fill();
-                ctx.strokeStyle = '#ffffff';
+                //todo edit stroke style
+                ctx.strokeStyle = '#000000';
                 ctx.lineWidth = 1;
                 ctx.stroke();
 
                 if (marker.label) {
-                    const fontSize = 14;
-                    ctx.font = `bold ${fontSize}px '楷体', 'KaiTi', serif`;
+                    ctx.font = `bold ${marker.fontSize}px '${marker.fontFamily}', serif`;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'bottom';
                     ctx.fillStyle = '#222222';
-                    ctx.fillText(marker.label, screenX, screenY - 10);
+                    ctx.fillText(marker.label, screenX, screenY - 8);
                 }
             }
         }
